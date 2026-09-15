@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jarvito</title>
+  <link rel="icon" href="\jarvitologo.ico" type="image/x-icon">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="fire-btn-container">
+      <button id="hotIdeaBtn" class="fire-btn" title="Hot Idea">
+        <i class="fa-solid fa-lightbulb"></i>
+      </button>
+    </div>
+    <nav class="nav-menu">
+      <button class="nav-btn active" data-target="page-projects-ongoing" title="Projetos em Andamento">
+        <i class="fa-solid fa-spinner"></i>
+      </button>
+      <button class="nav-btn" data-target="page-take-notes" title="Take Notes">
+        <i class="fa-solid fa-note-sticky"></i>
+      </button>
+      <button class="nav-btn" data-target="page-calendar" title="Calendário">
+        <i class="fa-solid fa-calendar-days"></i>
+      </button>
+      <button class="nav-btn" data-target="page-projects-completed" title="Projetos Concluídos">
+        <i class="fa-solid fa-circle-check"></i>
+      </button>
+    </nav>
+    <button id="btnSyncSettings" class="fire-btn" title="Configurar Sincronização" style="margin-top: auto;">
+      <i class="fa-solid fa-cloud"></i>
+    </button>
+  </aside>
+
+  <main class="main-content">
+    
+    <section id="page-projects-ongoing" class="page-content active-page">
+      <div class="reminder-banner">
+        <span>Lembrete! Organize suas tarefas diárias com prioridade.</span>
+      </div>
+
+      <div class="projects-header-actions">
+        <h1>Projetos em Andamento</h1>
+        <div class="action-buttons">
+          <button class="btn-action btn-add" title="Adicionar Projeto"><i class="fa-solid fa-plus"></i> Novo Projeto</button>
+          <button class="btn-action btn-delete" title="Modo de Exclusão de Projeto"><i class="fa-solid fa-trash"></i> Excluir Projeto</button>
+          <button class="btn-action btn-confirm-delete" id="btnConfirmDelete" style="display: none;"><i class="fa-solid fa-check"></i> Confirmar Exclusão</button>
+          <button class="btn-action btn-cancel-delete" id="btnCancelDelete" style="display: none;"><i class="fa-solid fa-xmark"></i> Cancelar</button>
+        </div>
+      </div>
+
+      <div class="projects-list"></div>
+    </section>
+
+    <section id="page-take-notes" class="page-content">
+      <h1>Take Notes & Hot Ideas</h1>
+      <p class="section-desc">Gerencie suas anotações livres e acompanhe suas ideias rápidas no mesmo lugar.</p>
+      
+      <div class="notes-split-container">
+        <div class="notes-column">
+          <h2><i class="fa-solid fa-pen-to-square"></i> Anotações Livres</h2>
+          <textarea class="notes-textarea" placeholder="Escreva suas anotações aqui..."></textarea>
+        </div>
+
+        <div class="hot-ideas-column">
+          <h2><i class="fa-solid fa-lightbulb"></i> Histórico de Hot Ideas</h2>
+          <div id="hotIdeasHistoryList" class="hot-ideas-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-calendar" class="page-content">
+      <h1>Calendário</h1>
+      <p class="section-desc">Acompanhe seus prazos de entrega e marcos do projeto. Clique em um dia para gerenciar eventos.</p>
+      
+      <div class="calendar-wrapper">
+        <div class="calendar-header-controls">
+          <button id="btnPrevMonth" class="btn-calendar-nav"><i class="fa-solid fa-chevron-left"></i></button>
+          <h2 id="calendarMonthYear">Mês Ano</h2>
+          <button id="btnNextMonth" class="btn-calendar-nav"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+
+        <div class="calendar-weekdays">
+          <div>Dom</div>
+          <div>Seg</div>
+          <div>Ter</div>
+          <div>Qua</div>
+          <div>Qui</div>
+          <div>Sex</div>
+          <div>Sáb</div>
+        </div>
+
+        <div id="calendarDaysGrid" class="calendar-days-grid"></div>
+      </div>
+    </section>
+
+    <section id="page-projects-completed" class="page-content">
+      <h1>Projetos Concluídos</h1>
+      <p class="section-desc">Histórico de projetos que atingiram 100% de conclusão.</p>
+      <div class="completed-projects-list" style="margin-top: 20px;"></div>
+    </section>
+
+  </main>
+
+  <div id="modalCalendarEvent" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="calendarModalTitle">Eventos do Dia</h2>
+        <button class="btn-close-modal" id="btnCloseCalendarModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Novo Evento / Prazo:</label>
+          <div class="modal-task-inputs">
+            <input type="text" id="calendarEventInput" placeholder="Ex: Entrega do Protótipo...">
+            <button type="button" id="btnAddCalendarEvent" class="btn-add-modal-task">+ Adicionar</button>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: 10px;">
+          <label>Eventos Cadastrados:</label>
+          <div id="calendarEventsList" class="modal-task-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnCloseCalendarModalFooter">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalHotIdea" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Hot Idea</h2>
+        <button class="btn-close-modal" id="btnCloseHotIdeaModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Sua Ideia Rápida:</label>
+          <textarea id="hotIdeaText" class="notes-textarea" style="height: 120px;" placeholder="Digite sua ideia aqui..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnCancelHotIdeaModal">Cancelar</button>
+        <button class="btn-modal-submit" id="btnSaveHotIdeaModal" style="background: #22c55e;">Concluir</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalNewProject" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Criar Novo Projeto</h2>
+        <button class="btn-close-modal" id="btnCloseModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Nome do Projeto:</label>
+          <input type="text" id="modalProjectName" placeholder="Ex: PROJETO MARTE">
+        </div>
+
+        <div class="modal-tasks-section">
+          <label>Adicionar Tarefas Iniciais:</label>
+          <div class="modal-task-inputs">
+            <input type="text" id="modalTaskName" placeholder="Nome da tarefa...">
+            <select id="modalTaskPriority" class="select-task-priority">
+              <option value="1">Prioridade 1</option>
+              <option value="2">Prioridade 2</option>
+              <option value="3">Prioridade 3</option>
+            </select>
+            <button type="button" id="btnAddModalTask" class="btn-add-modal-task">+ Adicionar</button>
+          </div>
+
+          <div class="modal-task-list" id="modalTaskList"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnCancelModal">Cancelar</button>
+        <button class="btn-modal-submit" id="btnSaveModalProject">Criar Projeto</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalEditTask" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Editar Tarefa</h2>
+        <button class="btn-close-modal" id="btnCloseEditTaskModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Nome da Tarefa:</label>
+          <input type="text" id="editModalTaskName" placeholder="Nome da tarefa...">
+        </div>
+        <div class="form-group">
+          <label>Nível de Prioridade:</label>
+          <select id="editModalTaskPriority" class="select-task-priority" style="width: 100%;">
+            <option value="1">Prioridade 1</option>
+            <option value="2">Prioridade 2</option>
+            <option value="3">Prioridade 3</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnCancelEditTaskModal">Cancelar</button>
+        <button class="btn-modal-submit" id="btnSaveEditTaskModal">Salvar Alterações</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalSyncCode" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Sincronização entre Dispositivos</h2>
+        <button class="btn-close-modal" id="btnCloseSyncModal" style="display: none;">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Código de Sincronização:</label>
+          <input type="text" id="syncCodeInput" placeholder="Ex: minha-familia-2024">
+        </div>
+        <p style="color: #a78bfa; font-size: 13px;">Use o mesmo código em todos os dispositivos que você quiser sincronizar. Guarde-o em um lugar seguro — qualquer pessoa com esse código pode ver e editar os dados.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-submit" id="btnConfirmSyncCode">Conectar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="javao.js"></script>
+</body>
+</html>
