@@ -851,6 +851,10 @@ body {
   .nav-btn {
     padding: 10px;
     height: 100%;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .nav-btn.active, .nav-btn:hover {
@@ -861,9 +865,8 @@ body {
   #btnSyncSettings {
     margin-top: 0 !important;
     margin-bottom: 0;
-    width: auto;
+    flex: 1;
     height: 100%;
-    flex-shrink: 0;
     background: transparent;
     border: none;
     color: #a78bfa;
