@@ -83,8 +83,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function iniciarSincronizacao() {
+    function iniciarSincronizacao() {
     if (unsubscribeSnapshot) unsubscribeSnapshot();
+    window.dispatchEvent(new CustomEvent('jarvito:syncstart', { detail: { code: syncCode } }));
 
     unsubscribeSnapshot = getDocRef().onSnapshot((doc) => {
       isApplyingRemoteData = true;
@@ -112,11 +113,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderizarTudoAposSync() {
+    function renderizarTudoAposSync() {
     if (mainNotesTextarea) mainNotesTextarea.value = notesData;
     renderizarProjetos();
     renderizarCalendario();
     renderizarHotIdeas();
+    window.dispatchEvent(new CustomEvent('jarvito:projects', { detail: { titles: projectsData.map(p => p.title) } }));
   }
 
   const mainNotesTextarea = document.querySelector('.notes-textarea');

@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jarvito</title>
+  <script>
+    try {
+      var t = localStorage.getItem('jarvito_theme');
+      var a = localStorage.getItem('jarvito_accent');
+      if (t) document.documentElement.setAttribute('data-theme', t);
+      if (a) document.documentElement.setAttribute('data-accent', a);
+    } catch (e) {}
+  </script>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0d0614">
   <link rel="icon" href="icons/favicon-32x32.png" type="image/png">
@@ -34,14 +42,20 @@
       <button class="nav-btn" data-target="page-projects-completed" title="Projetos Concluídos">
         <i class="fa-solid fa-circle-check"></i>
       </button>
+      <button class="nav-btn" data-target="page-gallery" title="Galeria">
+        <i class="fa-solid fa-images"></i>
+      </button>
+      <button class="nav-btn" data-target="page-settings" title="Configurações">
+        <i class="fa-solid fa-gear"></i>
+      </button>
     </nav>
-    <button id="btnSyncSettings" class="fire-btn" title="Configurar Sincronização" style="margin-top: auto;">
+    <button id="btnSyncSettings" class="fire-btn" title="Configurar Sincronização" style="display: none;">
       <i class="fa-solid fa-cloud"></i>
     </button>
   </aside>
 
   <main class="main-content">
-    
+
     <section id="page-projects-ongoing" class="page-content active-page">
       <div class="reminder-banner">
         <span>Lembrete! Organize suas tarefas diárias com prioridade.</span>
@@ -63,7 +77,7 @@
     <section id="page-take-notes" class="page-content">
       <h1>Take Notes & Hot Ideas</h1>
       <p class="section-desc">Gerencie suas anotações livres e acompanhe suas ideias rápidas no mesmo lugar.</p>
-      
+
       <div class="notes-split-container">
         <div class="notes-column">
           <h2><i class="fa-solid fa-pen-to-square"></i> Anotações Livres</h2>
@@ -80,7 +94,7 @@
     <section id="page-calendar" class="page-content">
       <h1>Calendário</h1>
       <p class="section-desc">Acompanhe seus prazos de entrega e marcos do projeto. Clique em um dia para gerenciar eventos.</p>
-      
+
       <div class="calendar-wrapper">
         <div class="calendar-header-controls">
           <button id="btnPrevMonth" class="btn-calendar-nav"><i class="fa-solid fa-chevron-left"></i></button>
@@ -108,7 +122,61 @@
       <div class="completed-projects-list" style="margin-top: 20px;"></div>
     </section>
 
+    <section id="page-gallery" class="page-content">
+      <h1>Galeria</h1>
+      <p class="section-desc">Guarde imagens e organize por tags, como o nome de um projeto. Clique em uma imagem para ver e editar.</p>
+
+      <div class="gallery-toolbar">
+        <button class="btn-action btn-gallery-add" id="btnOpenGalleryUpload"><i class="fa-solid fa-plus"></i> Adicionar imagens</button>
+        <span class="gallery-count" id="galleryCount"></span>
+      </div>
+
+      <div id="galleryTagFilters" class="tag-filters"></div>
+      <div id="galleryGrid" class="gallery-grid"></div>
+    </section>
+
+    <section id="page-settings" class="page-content">
+      <h1>Configurações</h1>
+      <p class="section-desc">Personalize as cores do Jarvito. As escolhas ficam salvas neste dispositivo.</p>
+
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h2><i class="fa-solid fa-circle-half-stroke"></i> Tema de fundo</h2>
+          <p>Escolha entre o fundo escuro (padrão) e o claro.</p>
+          <div class="theme-options">
+            <button class="theme-option" data-theme="dark"><span class="theme-preview dark"></span>Escuro</button>
+            <button class="theme-option" data-theme="light"><span class="theme-preview light"></span>Claro</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h2><i class="fa-solid fa-palette"></i> Cor de realce</h2>
+          <p>Muda a cor dos ícones, botões, barras e detalhes.</p>
+          <div class="accent-options">
+            <button class="accent-swatch" data-accent="roxo"><span class="accent-dot" style="background: linear-gradient(135deg, #8b5cf6, #ec4899);"></span>Roxo</button>
+            <button class="accent-swatch" data-accent="azul"><span class="accent-dot" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></span>Azul</button>
+            <button class="accent-swatch" data-accent="verde"><span class="accent-dot" style="background: linear-gradient(135deg, #10b981, #14b8a6);"></span>Verde</button>
+            <button class="accent-swatch" data-accent="laranja"><span class="accent-dot" style="background: linear-gradient(135deg, #f97316, #ef4444);"></span>Laranja</button>
+            <button class="accent-swatch" data-accent="rosa"><span class="accent-dot" style="background: linear-gradient(135deg, #ec4899, #d946ef);"></span>Rosa</button>
+            <button class="accent-swatch" data-accent="dourado"><span class="accent-dot" style="background: linear-gradient(135deg, #eab308, #f97316);"></span>Dourado</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h2><i class="fa-solid fa-cloud"></i> Sincronização</h2>
+          <p>Veja ou troque o código usado para sincronizar seus dados entre dispositivos.</p>
+          <button class="btn-action btn-gallery-add" id="btnOpenSyncFromSettings">Código de sincronização</button>
+        </div>
+
+        <div>
+          <button class="btn-modal-cancel" id="btnResetTheme">Restaurar cores padrão</button>
+        </div>
+      </div>
+    </section>
+
   </main>
+
+  <datalist id="galleryTagSuggestions"></datalist>
 
   <div id="modalCalendarEvent" class="modal-overlay" style="display: none;">
     <div class="modal-content">
@@ -226,7 +294,7 @@
           <label>Código de Sincronização:</label>
           <input type="text" id="syncCodeInput" placeholder="Ex: minha-familia-2024">
         </div>
-        <p style="color: #a78bfa; font-size: 13px;">Use o mesmo código em todos os dispositivos que você quiser sincronizar. Guarde-o em um lugar seguro — qualquer pessoa com esse código pode ver e editar os dados.</p>
+        <p style="color: var(--accent-soft); font-size: 13px;">Use o mesmo código em todos os dispositivos que você quiser sincronizar. Guarde-o em um lugar seguro — qualquer pessoa com esse código pode ver e editar os dados.</p>
       </div>
       <div class="modal-footer">
         <button class="btn-modal-submit" id="btnConfirmSyncCode">Conectar</button>
@@ -234,7 +302,64 @@
     </div>
   </div>
 
+  <div id="modalGalleryUpload" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Adicionar imagens</h2>
+        <button class="btn-close-modal" id="btnCloseGalleryUpload">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="uploadDrop" class="upload-drop">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <div>Toque para escolher imagens<br><small>ou arraste para cá</small></div>
+        </div>
+        <input type="file" id="galleryFileInput" accept="image/*" multiple hidden>
+        <div id="uploadPreview" class="upload-preview"></div>
+
+        <div class="form-group">
+          <label>Tags (ex.: nome de um projeto):</label>
+          <div class="tag-input-row">
+            <input type="text" id="uploadTagInput" list="galleryTagSuggestions" placeholder="Digite e pressione Enter">
+            <button type="button" class="btn-add-modal-task" id="btnAddUploadTag">+ Tag</button>
+          </div>
+          <div id="uploadTagList" class="tag-list"></div>
+        </div>
+        <p id="uploadStatus" class="upload-status"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" id="btnCancelGalleryUpload">Cancelar</button>
+        <button class="btn-modal-submit" id="btnSaveGalleryUpload">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalGalleryView" class="modal-overlay" style="display: none;">
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <h2>Imagem</h2>
+        <button class="btn-close-modal" id="btnCloseGalleryView">&times;</button>
+      </div>
+      <div class="modal-body">
+        <img id="viewerImg" class="viewer-img" alt="Imagem da galeria">
+        <div class="form-group">
+          <label>Tags:</label>
+          <div id="viewerTagList" class="tag-list"></div>
+          <div class="tag-input-row">
+            <input type="text" id="viewerTagInput" list="galleryTagSuggestions" placeholder="Adicionar tag...">
+            <button type="button" class="btn-add-modal-task" id="btnAddViewerTag">+ Tag</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-action btn-remove-image" id="btnDeleteImage"><i class="fa-solid fa-trash"></i> Excluir</button>
+        <button class="btn-modal-cancel" id="btnCloseGalleryViewFooter">Fechar</button>
+        <button class="btn-modal-submit" id="btnSaveViewerTags">Salvar tags</button>
+      </div>
+    </div>
+  </div>
+
   <script src="javao.js"></script>
+  <script src="extras.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

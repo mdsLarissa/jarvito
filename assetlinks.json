@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.jarvito.twa",
+        "sha256_cert_fingerprints": ["A9:41:14:AA:A6:36:3C:DE:3D:0C:1D:BB:D3:87:D9:2C:55:3F:AB:1F:B7:51:DD:80:F3:2E:7B:80:C6:C7:96:A5"]
+      }
+    }]

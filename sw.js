@@ -1,9 +1,10 @@
-const CACHE_NAME = 'jarvito-cache-v1';
+const CACHE_NAME = 'jarvito-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './javao.js',
+  './extras.js',
   './manifest.json',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png'
