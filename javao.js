@@ -16,6 +16,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Escapa texto antes de colocá-lo dentro de HTML (usado nas descrições das tasks)
+  function escapeHtml(texto) {
+    return String(texto == null ? '' : texto)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   // ===== CONFIGURAÇÃO DE TEMAS E CORES (CONFIGURAÇÕES) =====
   const THEME_KEY = 'jarvito_theme';
   const ACCENT_KEY = 'jarvito_accent';
@@ -134,7 +143,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (err) {
       console.error('Erro ao salvar no Firestore:', err);
-      alert('Não foi possível salvar suas alterações. Verifique sua conexão e o código de sincronização.');
+      alert(err && err.code === 'permission-denied'
+        ? 'O Firebase recusou a gravação (permission-denied). Atualize as regras do Firestore no Firebase Console.'
+        : 'Não foi possível salvar suas alterações. Verifique sua conexão e o código de sincronização.');
     }
   }
 
@@ -142,7 +153,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (unsubscribeSnapshot) unsubscribeSnapshot();
 
     unsubscribeSnapshot = getDocRef().onSnapshot((doc) => {
+      // "Eco" da nossa própria gravação: o que está na tela já é o que foi salvo.
+      // Ignorar evita redesenhar a tela (e perder o cursor) enquanto você digita.
+      if (doc.metadata && doc.metadata.hasPendingWrites) return;
+
       isApplyingRemoteData = true;
+      const descricaoDigitando = capturarDescricaoEmEdicao();
 
       if (doc.exists) {
         const data = doc.data();
@@ -159,11 +175,14 @@ document.addEventListener('DOMContentLoaded', () => {
         getDocRef().set(padrao);
       }
 
+      reaplicarDescricaoEmEdicao(descricaoDigitando);
       renderizarTudoAposSync();
       isApplyingRemoteData = false;
     }, (err) => {
       console.error('Erro na sincronização com o Firestore:', err);
-      alert('Não foi possível conectar à sincronização. Verifique sua conexão com a internet.');
+      alert(err && err.code === 'permission-denied'
+        ? 'O Firebase recusou a leitura (permission-denied). Atualize as regras do Firestore no Firebase Console.'
+        : 'Não foi possível conectar à sincronização. Verifique sua conexão com a internet.');
     });
 
     if (syncCode) {
@@ -173,9 +192,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderizarTudoAposSync() {
     if (mainNotesTextarea) mainNotesTextarea.value = notesData;
-    renderizarProjetos();
+
+    // Se você está escrevendo uma descrição, não redesenha os projetos agora
+    // (senão o texto e o cursor sumiriam). O redesenho acontece quando você sair do campo.
+    if (descricaoEmEdicao()) {
+      rerenderProjetosPendente = true;
+    } else {
+      renderizarProjetos();
+    }
+
     renderizarCalendario();
     renderizarHotIdeas();
+    atualizarDatalist();
   }
 
   const mainNotesTextarea = document.querySelector('.notes-textarea');
@@ -312,11 +340,54 @@ document.addEventListener('DOMContentLoaded', () => {
   const projectsList = document.querySelector('.projects-list');
   const completedProjectsList = document.querySelector('.completed-projects-list');
 
+  // Guarda o que está aberto na tela, para não fechar tudo quando a tela é redesenhada
+  const expandedProjects = new Set();        // chaves dos projetos abertos
+  const expandedTaskByProject = new Map();   // chave do projeto -> índice da task com a descrição aberta
+  let descricaoSaveTimeout = null;
+  let descricaoPendente = false;
+  let rerenderProjetosPendente = false;
+
+  function chaveDoProjeto(project, pIndex) {
+    return String(project.id != null ? project.id : 'i' + pIndex);
+  }
+
+  function descricaoEmEdicao() {
+    const a = document.activeElement;
+    return !!(a && a.classList && a.classList.contains('task-description-input'));
+  }
+
+  // Se chegar uma atualização de outro aparelho enquanto você digita, o texto ainda não salvo
+  // é guardado e devolvido para a tarefa certa depois que os dados novos forem aplicados.
+  function capturarDescricaoEmEdicao() {
+    if (!descricaoEmEdicao()) return null;
+    const campo = document.activeElement;
+    const card = campo.closest('.project-card');
+    const item = campo.closest('.task-item');
+    if (!card || !item) return null;
+
+    const pIndex = parseInt(card.getAttribute('data-project-index'));
+    const tIndex = parseInt(item.getAttribute('data-task-index'));
+    const task = projectsData[pIndex] && projectsData[pIndex].tasks[tIndex];
+    if (!task) return null;
+
+    return { chave: card.getAttribute('data-project-key'), tIndex, texto: task.text, valor: campo.value };
+  }
+
+  function reaplicarDescricaoEmEdicao(edicao) {
+    if (!edicao) return;
+    const projeto = projectsData.find((proj, i) => chaveDoProjeto(proj, i) === edicao.chave);
+    const task = projeto && projeto.tasks[edicao.tIndex];
+    if (task && task.text === edicao.texto) task.description = edicao.valor;
+  }
+
   function criarCardProjetoHTML(project, pIndex) {
     const totalTasks = project.tasks.length;
     const completedTasks = project.tasks.filter(t => t.completed).length;
     const percentage = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
     const openTasks = totalTasks - completedTasks;
+    const pKey = chaveDoProjeto(project, pIndex);
+    const projetoAberto = expandedProjects.has(pKey);
+    const taskAberta = expandedTaskByProject.has(pKey) ? expandedTaskByProject.get(pKey) : -1;
 
     let statusColor;
     let statusText;
@@ -338,21 +409,31 @@ document.addEventListener('DOMContentLoaded', () => {
       .sort((a, b) => a.task.priority - b.task.priority);
 
     tasksOrdenadas.forEach(({ task, tIndex }) => {
+      const descricao = task.description || '';
+      const temDescricao = descricao.trim() !== '';
+      const aberta = tIndex === taskAberta;
+
       tasksHTML += `
-        <div class="task-item" data-task-index="${tIndex}">
+        <div class="task-item${temDescricao ? ' has-description' : ''}${aberta ? ' is-open' : ''}" data-task-index="${tIndex}">
           <div class="task-delete-selector" style="display: none;">
             <input type="checkbox" class="task-delete-checkbox">
           </div>
-          <span class="task-title" title="Clique para editar">${task.text}</span>
+          <span class="task-title" title="Clique para abrir a descrição">${task.text}</span>
+          <span class="task-desc-badge" title="Esta tarefa tem descrição"><i class="fa-solid fa-align-left"></i></span>
           <span class="task-priority priority-${task.priority}" data-priority="${task.priority}">(Nível ${task.priority} de Prioridade!)</span>
-          <button class="btn-edit-task" title="Editar Tarefa"><i class="fa-solid fa-pen"></i></button>
+          <button class="btn-edit-task" title="Editar nome e prioridade"><i class="fa-solid fa-pen"></i></button>
           <input type="checkbox" class="custom-checkbox" ${task.completed ? 'checked' : ''}>
+          <div class="task-description-panel" style="display: ${aberta ? 'block' : 'none'};">
+            <label>Descrição / anotações</label>
+            <textarea class="task-description-input" placeholder="Escreva detalhes, passos, links ou anotações desta tarefa...">
+${escapeHtml(descricao)}</textarea>
+          </div>
         </div>
       `;
     });
 
     return `
-      <div class="project-card" data-project-index="${pIndex}">
+      <div class="project-card${projetoAberto ? ' expanded' : ''}" data-project-index="${pIndex}" data-project-key="${escapeHtml(pKey)}">
         <div class="project-delete-selector" style="display: none;">
           <input type="checkbox" class="card-delete-checkbox">
           <span>Selecionar para excluir projeto</span>
@@ -369,7 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="progress-bar-container">
           <div class="progress-bar ${percentage === 100 ? 'complete' : 'yellow'}" style="width: ${percentage}%;"></div>
         </div>
-        <div class="project-details" style="display: none;">
+        <div class="project-details" style="display: ${projetoAberto ? 'block' : 'none'};">
           <div class="task-actions">
             <button class="btn-pill btn-add-task">+ Add Task</button>
             <button class="btn-pill btn-remove-task">- Remove Task</button>
@@ -395,6 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderizarProjetos() {
+    rerenderProjetosPendente = false;
     if (projectsList) projectsList.innerHTML = '';
     if (completedProjectsList) completedProjectsList.innerHTML = '';
 
@@ -420,6 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function alternarExpansaoProjeto(cardAtivo) {
     const detailsActive = cardAtivo.querySelector('.project-details');
     const estaAberto = detailsActive && detailsActive.style.display === 'block';
+    const chave = cardAtivo.getAttribute('data-project-key');
 
     const allCards = document.querySelectorAll('.project-card');
     allCards.forEach(card => {
@@ -428,10 +511,78 @@ document.addEventListener('DOMContentLoaded', () => {
       if (details) details.style.display = 'none';
     });
 
+    expandedProjects.clear();
+
     if (!estaAberto) {
       cardAtivo.classList.add('expanded');
       if (detailsActive) detailsActive.style.display = 'block';
+      if (chave) expandedProjects.add(chave);
     }
+  }
+
+  // Abre/fecha a descrição de uma task (só uma aberta por projeto, como nos projetos)
+  function alternarDescricaoTask(card, taskItem) {
+    const chave = card.getAttribute('data-project-key');
+    const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
+    const painel = taskItem.querySelector('.task-description-panel');
+    if (!painel) return;
+
+    const estaAberta = painel.style.display === 'block';
+
+    card.querySelectorAll('.task-item').forEach(item => {
+      item.classList.remove('is-open');
+      const p = item.querySelector('.task-description-panel');
+      if (p) p.style.display = 'none';
+    });
+
+    expandedTaskByProject.delete(chave);
+
+    if (!estaAberta) {
+      painel.style.display = 'block';
+      taskItem.classList.add('is-open');
+      expandedTaskByProject.set(chave, tIndex);
+      const campo = painel.querySelector('.task-description-input');
+      if (campo) campo.focus();
+    }
+  }
+
+  // Salva a descrição enquanto você digita (sem redesenhar a tela)
+  function tratarInputDescricao(e) {
+    if (!e.target.classList.contains('task-description-input')) return;
+
+    const card = e.target.closest('.project-card');
+    const taskItem = e.target.closest('.task-item');
+    if (!card || !taskItem) return;
+
+    const pIndex = parseInt(card.getAttribute('data-project-index'));
+    const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
+    const task = projectsData[pIndex] && projectsData[pIndex].tasks[tIndex];
+    if (!task) return;
+
+    task.description = e.target.value;
+    taskItem.classList.toggle('has-description', e.target.value.trim() !== '');
+
+    descricaoPendente = true;
+    clearTimeout(descricaoSaveTimeout);
+    descricaoSaveTimeout = setTimeout(() => {
+      descricaoPendente = false;
+      salvarTudo();
+    }, 600);
+  }
+
+  // Ao sair do campo: grava na hora e, se chegou alguma atualização enquanto você digitava, redesenha
+  function tratarSaidaDescricao(e) {
+    if (!e.target.classList.contains('task-description-input')) return;
+
+    if (descricaoPendente) {
+      clearTimeout(descricaoSaveTimeout);
+      descricaoPendente = false;
+      salvarTudo();
+    }
+
+    setTimeout(() => {
+      if (rerenderProjetosPendente && !descricaoEmEdicao()) renderizarProjetos();
+    }, 0);
   }
 
   const btnAddProject = document.querySelector('.btn-add');
@@ -546,6 +697,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         projectsData = projectsData.filter((_, idx) => !indexesToRemove.includes(idx));
+        expandedProjects.clear();
+        expandedTaskByProject.clear();
         salvarTudo();
         renderizarProjetos();
         alternarModoDelecaoProjetos(false);
@@ -636,12 +789,22 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // Lápis: edita nome e prioridade da task
     const btnEditTask = e.target.closest('.btn-edit-task');
-    if (btnEditTask || e.target.classList.contains('task-title')) {
+    if (btnEditTask) {
       const taskItem = e.target.closest('.task-item');
       if (taskItem) {
         const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
         abrirModalEditarTask(pIndex, tIndex);
+        return;
+      }
+    }
+
+    // Clique na task (nome, prioridade ou ícone de descrição): abre/fecha a descrição
+    if (e.target.closest('.task-title, .task-priority, .task-desc-badge')) {
+      const taskItem = e.target.closest('.task-item');
+      if (taskItem) {
+        alternarDescricaoTask(card, taskItem);
         return;
       }
     }
@@ -720,6 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       projectsData[pIndex].tasks = projectsData[pIndex].tasks.filter((_, idx) => !taskIndexesToRemove.includes(idx));
+      expandedTaskByProject.delete(card.getAttribute('data-project-key'));
       salvarTudo();
       renderizarProjetos();
     }
@@ -751,15 +915,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  if (projectsList) {
-    projectsList.addEventListener('click', tratarAcoesDoCard);
-    projectsList.addEventListener('change', tratarMudancaCheckbox);
-  }
-
-  if (completedProjectsList) {
-    completedProjectsList.addEventListener('click', tratarAcoesDoCard);
-    completedProjectsList.addEventListener('change', tratarMudancaCheckbox);
-  }
+  [projectsList, completedProjectsList].forEach(lista => {
+    if (!lista) return;
+    lista.addEventListener('click', tratarAcoesDoCard);
+    lista.addEventListener('change', tratarMudancaCheckbox);
+    lista.addEventListener('input', tratarInputDescricao);
+    lista.addEventListener('focusout', tratarSaidaDescricao);
+  });
 
 
   // ===== CALENDÁRIO =====
@@ -926,7 +1088,36 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
-  // ===== GALERIA =====
+  // ===== GALERIA (imagens + arquivos) =====
+  const TAMANHO_MAX_ARQUIVO = 5 * 1024 * 1024; // 5 MB por arquivo
+  const TAMANHO_PARTE = 700000;                // caracteres por parte (o Firestore aceita ~1 MB por documento)
+
+  const TIPOS_ARQUIVO = {
+    pdf:  { icone: 'fa-file-pdf',        nome: 'PDF',        mime: 'application/pdf' },
+    doc:  { icone: 'fa-file-word',       nome: 'Word',       mime: 'application/msword' },
+    docx: { icone: 'fa-file-word',       nome: 'Word',       mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    xls:  { icone: 'fa-file-excel',      nome: 'Excel',      mime: 'application/vnd.ms-excel' },
+    xlsx: { icone: 'fa-file-excel',      nome: 'Excel',      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    csv:  { icone: 'fa-file-csv',        nome: 'CSV',        mime: 'text/csv' },
+    ppt:  { icone: 'fa-file-powerpoint', nome: 'PowerPoint', mime: 'application/vnd.ms-powerpoint' },
+    pptx: { icone: 'fa-file-powerpoint', nome: 'PowerPoint', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+    txt:  { icone: 'fa-file-lines',      nome: 'Texto',      mime: 'text/plain' }
+  };
+
+  const extensaoDe = (nome) => {
+    const partes = String(nome || '').split('.');
+    return partes.length > 1 ? partes.pop().toLowerCase() : '';
+  };
+  const ehImagem = (f) => (f.type || '').startsWith('image/');
+  const ehArquivoSuportado = (f) => !!TIPOS_ARQUIVO[extensaoDe(f.name)];
+
+  function formatarTamanho(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
+  }
+
   let galleryCode = null;
   let galleryUnsub = null;
   let galleryItems = [];
@@ -935,6 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let pendingFiles = [];
   let pendingTags = [];
   let viewerId = null;
+  let viewerItem = null;
   let viewerTags = [];
 
   const gridEl = document.getElementById('galleryGrid');
@@ -952,7 +1144,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSaveUpload = document.getElementById('btnSaveGalleryUpload');
 
   const modalViewer = document.getElementById('modalGalleryView');
+  const viewerTitle = document.getElementById('viewerTitle');
   const viewerImg = document.getElementById('viewerImg');
+  const viewerFileBox = document.getElementById('viewerFileBox');
+  const viewerFileIcon = document.getElementById('viewerFileIcon');
+  const viewerFileName = document.getElementById('viewerFileName');
+  const viewerFileMeta = document.getElementById('viewerFileMeta');
+  const viewerFileStatus = document.getElementById('viewerFileStatus');
   const viewerTagList = document.getElementById('viewerTagList');
   const viewerTagInput = document.getElementById('viewerTagInput');
 
@@ -1021,12 +1219,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return chip;
   }
 
-  function ligarCampoDeTag(inputEl, botaoEl, lista, aoMudar) {
+  // IMPORTANTE: recebe uma FUNÇÃO que devolve a lista atual (obterLista).
+  // Assim o botão sempre escreve na lista certa, mesmo depois de ela ser recriada.
+  function ligarCampoDeTag(inputEl, botaoEl, obterLista, aoMudar) {
     if (!inputEl || !botaoEl) return;
-    const adicionar = () => adicionarTagDoInput(inputEl, lista, aoMudar);
+    const adicionar = () => adicionarTagDoInput(inputEl, obterLista(), aoMudar);
     botaoEl.addEventListener('click', adicionar);
     inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); adicionar(); }
+      if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); adicionar(); }
     });
     inputEl.addEventListener('input', () => {
       if (inputEl.value.includes(',')) {
@@ -1085,10 +1285,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFiltros();
 
     const itens = activeFilter ? galleryItems.filter((i) => temTag(i.tags || [], activeFilter)) : galleryItems;
-    if (countEl) countEl.textContent = itens.length + (itens.length === 1 ? ' imagem' : ' imagens');
+    if (countEl) countEl.textContent = itens.length + (itens.length === 1 ? ' item' : ' itens');
 
     if (!itens.length) {
-      gridEl.appendChild(mensagemGaleria(activeFilter ? 'Nenhuma imagem com essa tag.' : 'Nenhuma imagem ainda. Clique em "Adicionar imagens".'));
+      gridEl.appendChild(mensagemGaleria(activeFilter ? 'Nenhum item com essa tag.' : 'Nenhum item ainda. Clique em "Adicionar".'));
       return;
     }
 
@@ -1096,12 +1296,31 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = 'gallery-item';
 
-      const img = document.createElement('img');
-      img.src = item.thumb || item.data;
-      img.alt = item.name || 'Imagem';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      card.appendChild(img);
+      if (item.kind === 'file') {
+        card.classList.add('gallery-file');
+        const tipo = TIPOS_ARQUIVO[item.ext] || { icone: 'fa-file', nome: 'Arquivo' };
+
+        const icone = document.createElement('i');
+        icone.className = 'fa-solid ' + tipo.icone + ' gallery-file-icon ext-' + item.ext;
+        card.appendChild(icone);
+
+        const nome = document.createElement('div');
+        nome.className = 'gallery-file-name';
+        nome.textContent = item.name;
+        card.appendChild(nome);
+
+        const meta = document.createElement('div');
+        meta.className = 'gallery-file-meta';
+        meta.textContent = tipo.nome + ' · ' + formatarTamanho(item.size);
+        card.appendChild(meta);
+      } else {
+        const img = document.createElement('img');
+        img.src = item.thumb || item.data;
+        img.alt = item.name || 'Imagem';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        card.appendChild(img);
+      }
 
       if ((item.tags || []).length) {
         const tagsDiv = document.createElement('div');
@@ -1140,6 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ----- imagens: reduz o tamanho antes de enviar -----
   function redimensionar(file, maxLado, qualidade) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -1180,15 +1400,134 @@ document.addEventListener('DOMContentLoaded', () => {
     return { data, thumb };
   }
 
+  // ----- arquivos: divide em partes e guarda no Firestore -----
+  function lerComoBase64(file) {
+    return new Promise((resolve, reject) => {
+      const leitor = new FileReader();
+      leitor.onload = () => {
+        const texto = String(leitor.result);
+        resolve(texto.slice(texto.indexOf(',') + 1));
+      };
+      leitor.onerror = () => reject(new Error('Não foi possível ler "' + file.name + '".'));
+      leitor.readAsDataURL(file);
+    });
+  }
+
+  function base64ParaBlob(base64, mime) {
+    const binario = atob(base64);
+    const bytes = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+
+  const nomeDaParte = (i) => String(i).padStart(3, '0');
+
+  async function enviarArquivo(file, tags, criadoEm, aoProgredir) {
+    const base64 = await lerComoBase64(file);
+    if (!base64) throw new Error('O arquivo "' + file.name + '" está vazio.');
+
+    const partes = [];
+    for (let i = 0; i < base64.length; i += TAMANHO_PARTE) partes.push(base64.slice(i, i + TAMANHO_PARTE));
+
+    const ref = galleryCol().doc();
+    const escritas = [];
+    try {
+      for (let i = 0; i < partes.length; i++) {
+        if (aoProgredir) aoProgredir(i + 1, partes.length);
+        await ref.collection('chunks').doc(nomeDaParte(i)).set({ i, data: partes[i] });
+        escritas.push(i);
+      }
+      // O registro principal só é criado no fim: se algo falhar antes, nada aparece pela metade.
+      const ext = extensaoDe(file.name);
+      await ref.set({
+        kind: 'file',
+        name: file.name,
+        ext,
+        size: file.size,
+        mime: file.type || TIPOS_ARQUIVO[ext].mime,
+        chunks: partes.length,
+        tags,
+        createdAt: criadoEm
+      });
+    } catch (err) {
+      await Promise.all(escritas.map((i) => ref.collection('chunks').doc(nomeDaParte(i)).delete().catch(() => {})));
+      throw err;
+    }
+  }
+
+  async function baixarArquivo(item) {
+    if (!item || item.kind !== 'file') return;
+    if (viewerFileStatus) viewerFileStatus.textContent = 'Preparando o download...';
+    try {
+      const snap = await galleryCol().doc(item.id).collection('chunks').get();
+      const docs = snap.docs.slice().sort((a, b) => (a.id < b.id ? -1 : 1));
+      if (docs.length !== item.chunks) {
+        throw new Error('O arquivo está incompleto (' + docs.length + ' de ' + item.chunks + ' partes).');
+      }
+      const base64 = docs.map((d) => d.data().data).join('');
+      const blob = base64ParaBlob(base64, item.mime || 'application/octet-stream');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+      if (viewerFileStatus) viewerFileStatus.textContent = '';
+    } catch (err) {
+      console.error('Erro ao baixar o arquivo:', err);
+      if (viewerFileStatus) viewerFileStatus.textContent = 'Não foi possível baixar: ' + err.message;
+    }
+  }
+
+  async function excluirItem(item) {
+    const ref = galleryCol().doc(item.id);
+    if (item.kind === 'file') {
+      const partes = await ref.collection('chunks').get();
+      await Promise.all(partes.docs.map((d) => ref.collection('chunks').doc(d.id).delete()));
+    }
+    await ref.delete();
+  }
+
+  // ----- janela de upload -----
   function renderPreview() {
     if (!uploadPreview) return;
     uploadPreview.innerHTML = '';
-    pendingFiles.forEach((f) => {
-      const img = new Image();
-      const url = URL.createObjectURL(f);
-      img.onload = () => URL.revokeObjectURL(url);
-      img.src = url;
-      uploadPreview.appendChild(img);
+
+    pendingFiles.forEach((f, i) => {
+      const item = document.createElement('div');
+      item.className = 'upload-preview-item';
+
+      if (ehImagem(f)) {
+        const img = new Image();
+        const url = URL.createObjectURL(f);
+        img.onload = () => URL.revokeObjectURL(url);
+        img.src = url;
+        item.appendChild(img);
+      } else {
+        item.classList.add('is-file');
+        const tipo = TIPOS_ARQUIVO[extensaoDe(f.name)] || { icone: 'fa-file' };
+        const icone = document.createElement('i');
+        icone.className = 'fa-solid ' + tipo.icone;
+        const nome = document.createElement('span');
+        nome.textContent = f.name + ' (' + formatarTamanho(f.size) + ')';
+        item.appendChild(icone);
+        item.appendChild(nome);
+      }
+
+      const remover = document.createElement('button');
+      remover.type = 'button';
+      remover.className = 'upload-remove';
+      remover.title = 'Remover';
+      remover.textContent = '×';
+      remover.addEventListener('click', () => {
+        pendingFiles.splice(i, 1);
+        renderPreview();
+      });
+      item.appendChild(remover);
+
+      uploadPreview.appendChild(item);
     });
   }
 
@@ -1201,7 +1540,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function adicionarArquivos(lista) {
-    Array.from(lista).filter((f) => f.type.startsWith('image/')).forEach((f) => pendingFiles.push(f));
+    const recusados = [];
+    Array.from(lista).forEach((f) => {
+      if (ehImagem(f)) {
+        pendingFiles.push(f);
+      } else if (ehArquivoSuportado(f)) {
+        if (f.size > TAMANHO_MAX_ARQUIVO) {
+          recusados.push('"' + f.name + '" tem ' + formatarTamanho(f.size) + ' (o limite é 5 MB)');
+        } else {
+          pendingFiles.push(f);
+        }
+      } else {
+        recusados.push('"' + f.name + '" não é um tipo aceito');
+      }
+    });
+    if (uploadStatus) uploadStatus.textContent = recusados.length ? 'Não adicionado: ' + recusados.join('; ') + '.' : '';
     renderPreview();
   }
 
@@ -1215,6 +1568,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (uploadTagInput) uploadTagInput.value = '';
     if (uploadStatus) uploadStatus.textContent = '';
     if (fileInput) fileInput.value = '';
+    atualizarDatalist();
     renderPreview();
     renderUploadTags();
     if (modalUpload) modalUpload.style.display = 'flex';
@@ -1229,31 +1583,40 @@ document.addEventListener('DOMContentLoaded', () => {
       adicionarTagDoInput(uploadTagInput, pendingTags, renderUploadTags);
     }
     if (!pendingFiles.length) {
-      alert('Escolha pelo menos uma imagem.');
+      alert('Escolha pelo menos um arquivo ou imagem.');
       return;
     }
 
     if (btnSaveUpload) btnSaveUpload.disabled = true;
     const total = pendingFiles.length;
-    let enviadas = 0;
+    const tags = pendingTags.slice();
+    let enviados = 0;
     try {
       for (let i = 0; i < total; i++) {
-        if (uploadStatus) uploadStatus.textContent = 'Enviando ' + (i + 1) + ' de ' + total + '...';
         const f = pendingFiles[i];
-        const prep = await prepararImagem(f);
-        await galleryCol().add({
-          data: prep.data,
-          thumb: prep.thumb,
-          tags: pendingTags.slice(),
-          name: f.name,
-          createdAt: Date.now() + i
-        });
-        enviadas++;
+        const rotulo = 'Enviando ' + (i + 1) + ' de ' + total + '...';
+        if (uploadStatus) uploadStatus.textContent = rotulo;
+
+        if (ehImagem(f)) {
+          const prep = await prepararImagem(f);
+          await galleryCol().add({
+            data: prep.data,
+            thumb: prep.thumb,
+            tags,
+            name: f.name,
+            createdAt: Date.now() + i
+          });
+        } else {
+          await enviarArquivo(f, tags, Date.now() + i, (parte, totalPartes) => {
+            if (uploadStatus && totalPartes > 1) uploadStatus.textContent = rotulo + ' (parte ' + parte + ' de ' + totalPartes + ')';
+          });
+        }
+        enviados++;
       }
       fecharUpload();
     } catch (err) {
       console.error('Erro no upload:', err);
-      pendingFiles.splice(0, enviadas);
+      pendingFiles.splice(0, enviados);
       renderPreview();
       if (uploadStatus) {
         uploadStatus.textContent = err.code === 'permission-denied'
@@ -1288,8 +1651,9 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadDrop.addEventListener('drop', (e) => adicionarArquivos(e.dataTransfer.files));
   }
 
-  ligarCampoDeTag(uploadTagInput, document.getElementById('btnAddUploadTag'), pendingTags, renderUploadTags);
+  ligarCampoDeTag(uploadTagInput, document.getElementById('btnAddUploadTag'), () => pendingTags, renderUploadTags);
 
+  // ----- janela de visualização -----
   function renderViewerTags() {
     if (!viewerTagList) return;
     viewerTagList.innerHTML = '';
@@ -1302,9 +1666,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const item = galleryItems.find((i) => i.id === id);
     if (!item) return;
     viewerId = id;
+    viewerItem = item;
     viewerTags = (item.tags || []).slice();
-    if (viewerImg) viewerImg.src = item.data;
+
+    const ehArquivo = item.kind === 'file';
+    if (viewerTitle) viewerTitle.textContent = ehArquivo ? 'Arquivo' : 'Imagem';
+    if (viewerImg) viewerImg.style.display = ehArquivo ? 'none' : 'block';
+    if (viewerFileBox) viewerFileBox.style.display = ehArquivo ? 'flex' : 'none';
+    if (viewerFileStatus) viewerFileStatus.textContent = '';
+
+    if (ehArquivo) {
+      const tipo = TIPOS_ARQUIVO[item.ext] || { icone: 'fa-file', nome: 'Arquivo' };
+      if (viewerFileIcon) viewerFileIcon.className = 'fa-solid ' + tipo.icone + ' ext-' + item.ext;
+      if (viewerFileName) viewerFileName.textContent = item.name;
+      if (viewerFileMeta) viewerFileMeta.textContent = tipo.nome + ' · ' + formatarTamanho(item.size);
+      if (viewerImg) viewerImg.removeAttribute('src');
+    } else if (viewerImg) {
+      viewerImg.src = item.data;
+    }
+
     if (viewerTagInput) viewerTagInput.value = '';
+    atualizarDatalist();
     renderViewerTags();
     if (modalViewer) modalViewer.style.display = 'flex';
   }
@@ -1313,6 +1695,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalViewer) modalViewer.style.display = 'none';
     if (viewerImg) viewerImg.removeAttribute('src');
     viewerId = null;
+    viewerItem = null;
   }
 
   async function salvarTagsDoViewer() {
@@ -1330,14 +1713,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function excluirImagem() {
-    if (!viewerId) return;
-    if (!confirm('Excluir esta imagem? Essa ação não pode ser desfeita.')) return;
+    if (!viewerItem) return;
+    const oQue = viewerItem.kind === 'file' ? 'este arquivo' : 'esta imagem';
+    if (!confirm('Excluir ' + oQue + '? Essa ação não pode ser desfeita.')) return;
     try {
-      await galleryCol().doc(viewerId).delete();
+      await excluirItem(viewerItem);
       fecharViewer();
     } catch (err) {
-      console.error('Erro ao excluir imagem:', err);
-      alert('Não foi possível excluir a imagem.');
+      console.error('Erro ao excluir:', err);
+      alert('Não foi possível excluir.');
     }
   }
 
@@ -1345,12 +1729,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCloseGalleryViewFooter = document.getElementById('btnCloseGalleryViewFooter');
   const btnSaveViewerTags = document.getElementById('btnSaveViewerTags');
   const btnDeleteImage = document.getElementById('btnDeleteImage');
+  const btnDownloadFile = document.getElementById('btnDownloadFile');
 
   if (btnCloseGalleryView) btnCloseGalleryView.addEventListener('click', fecharViewer);
   if (btnCloseGalleryViewFooter) btnCloseGalleryViewFooter.addEventListener('click', fecharViewer);
   if (btnSaveViewerTags) btnSaveViewerTags.addEventListener('click', salvarTagsDoViewer);
   if (btnDeleteImage) btnDeleteImage.addEventListener('click', excluirImagem);
-  ligarCampoDeTag(viewerTagInput, document.getElementById('btnAddViewerTag'), viewerTags, renderViewerTags);
+  if (btnDownloadFile) btnDownloadFile.addEventListener('click', () => baixarArquivo(viewerItem));
+  ligarCampoDeTag(viewerTagInput, document.getElementById('btnAddViewerTag'), () => viewerTags, renderViewerTags);
 
 
   // ===== INICIALIZAÇÃO GERAL =====

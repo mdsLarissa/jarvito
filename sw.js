@@ -1,10 +1,9 @@
-const CACHE_NAME = 'jarvito-cache-v2';
+const CACHE_NAME = 'jarvito-cache-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './javao.js',
-  './extras.js',
   './manifest.json',
   './icons/icon-192x192.png',
   './icons/icon-512x512.png'
@@ -30,17 +29,26 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Rede primeiro: sempre busca a versão mais nova do site.
+// O cache só é usado quando está sem internet.
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
 
   // Não interceptar requisições de outros domínios (Firebase, CDNs, fontes, etc.)
-  if (url.origin !== self.location.origin) {
-    return;
-  }
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      return cachedResponse || fetch(event.request);
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.status === 200) {
+          const copia = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copia));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((r) => r || caches.match('./index.html')))
   );
 });

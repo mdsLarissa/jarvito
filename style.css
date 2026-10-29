@@ -1122,3 +1122,147 @@ body {
   .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
   .modal-footer { flex-wrap: wrap; }
 }
+
+/* ============================================================
+   NOVOS ESTILOS: descrição das tasks + arquivos na galeria
+   ============================================================ */
+
+/* ----- Descrição da task (abre ao clicar na task) ----- */
+.task-item { flex-wrap: wrap; }
+
+.task-title:hover { background: rgba(var(--accent-rgb), 0.2); }
+
+.task-item.is-open { border-left-color: var(--accent2); }
+
+.task-desc-badge {
+  display: none;
+  align-items: center;
+  color: var(--accent-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.task-item.has-description .task-desc-badge { display: inline-flex; }
+
+.task-description-panel {
+  flex: 1 1 100%;
+  order: 10;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(var(--accent-rgb), 0.35);
+}
+
+.task-description-panel label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-soft);
+  margin-bottom: 6px;
+}
+
+.task-description-input {
+  width: 100%;
+  min-height: 90px;
+  background: var(--field);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+}
+
+.task-description-input:focus { border-color: var(--accent2); }
+
+/* ----- Arquivos na galeria ----- */
+.gallery-item.gallery-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 10px 34px;
+  text-align: center;
+}
+
+.gallery-file-icon { font-size: 40px; color: var(--accent-soft); }
+.gallery-file-icon.ext-pdf { color: #ef4444; }
+.gallery-file-icon.ext-doc, .gallery-file-icon.ext-docx { color: #3b82f6; }
+.gallery-file-icon.ext-xls, .gallery-file-icon.ext-xlsx, .gallery-file-icon.ext-csv { color: #22c55e; }
+.gallery-file-icon.ext-ppt, .gallery-file-icon.ext-pptx { color: #f97316; }
+
+.gallery-file-name {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.gallery-file-meta { font-size: 11px; opacity: 0.7; }
+
+.gallery-item.gallery-file .gallery-item-tags { background: transparent; padding: 0 8px 8px; }
+
+.upload-hint { display: block; margin-top: 6px; opacity: 0.8; font-size: 11px; }
+
+.upload-preview-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-preview-item.is-file {
+  gap: 8px;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: 8px;
+  padding: 8px 30px 8px 10px;
+  max-width: 100%;
+}
+
+.upload-preview-item.is-file i { font-size: 20px; color: var(--accent-soft); }
+.upload-preview-item.is-file span { font-size: 12px; word-break: break-all; }
+
+.upload-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.upload-preview-item.is-file .upload-remove { top: 50%; right: 6px; transform: translateY(-50%); }
+
+.viewer-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 12px;
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  text-align: center;
+}
+
+.viewer-file > i { font-size: 56px; color: var(--accent-soft); }
+.viewer-file > i.ext-pdf { color: #ef4444; }
+.viewer-file > i.ext-doc, .viewer-file > i.ext-docx { color: #3b82f6; }
+.viewer-file > i.ext-xls, .viewer-file > i.ext-xlsx, .viewer-file > i.ext-csv { color: #22c55e; }
+.viewer-file > i.ext-ppt, .viewer-file > i.ext-pptx { color: #f97316; }
+.viewer-file-name { font-weight: 700; word-break: break-word; }
+.viewer-file-meta { font-size: 13px; opacity: 0.75; }
