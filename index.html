@@ -6,10 +6,20 @@
   <title>Jarvito</title>
   <script>
     try {
+      var r = document.documentElement;
       var t = localStorage.getItem('jarvito_theme');
       var a = localStorage.getItem('jarvito_accent');
-      if (t) document.documentElement.setAttribute('data-theme', t);
-      if (a) document.documentElement.setAttribute('data-accent', a);
+      if (t) r.setAttribute('data-theme', t);
+      if (a) r.setAttribute('data-accent', a);
+      if (a === 'custom') {
+        var v = JSON.parse(localStorage.getItem('jarvito_accent_vars') || 'null');
+        if (v) {
+          r.style.setProperty('--accent', v.a);
+          r.style.setProperty('--accent2', v.b);
+          r.style.setProperty('--accent-rgb', v.ar);
+          r.style.setProperty('--accent2-rgb', v.br);
+        }
+      }
     } catch (e) {}
   </script>
   <link rel="manifest" href="manifest.json">
@@ -76,12 +86,33 @@
 
     <section id="page-take-notes" class="page-content">
       <h1>Take Notes & Hot Ideas</h1>
-      <p class="section-desc">Gerencie suas anotações livres e acompanhe suas ideias rápidas no mesmo lugar.</p>
+      <p class="section-desc">Organize suas anotações em cartões modernos de vidro fosco e acompanhe suas ideias rápidas no mesmo lugar.</p>
 
       <div class="notes-split-container">
         <div class="notes-column">
-          <h2><i class="fa-solid fa-pen-to-square"></i> Anotações Livres</h2>
-          <textarea class="notes-textarea" placeholder="Escreva suas anotações aqui..."></textarea>
+          <div class="notes-creator-box">
+            <h2><i class="fa-solid fa-pen-to-square"></i> Nova Anotação</h2>
+            <div class="notes-creator-fields">
+              <input type="text" id="newNoteTitleInput" class="notes-creator-title" placeholder="Título da nota (opcional)...">
+              <textarea id="newNoteTextInput" class="notes-creator-textarea" placeholder="Escreva o conteúdo da sua nota aqui..."></textarea>
+              <div class="notes-creator-footer">
+                <div class="sticky-colors" id="newNoteColorPicker">
+                  <button type="button" class="sticky-color-dot dot-amarelo active" data-color="amarelo" title="Amarelo"></button>
+                  <button type="button" class="sticky-color-dot dot-rosa" data-color="rosa" title="Rosa"></button>
+                  <button type="button" class="sticky-color-dot dot-azul" data-color="azul" title="Azul"></button>
+                  <button type="button" class="sticky-color-dot dot-verde" data-color="verde" title="Verde"></button>
+                  <button type="button" class="sticky-color-dot dot-laranja" data-color="laranja" title="Laranja"></button>
+                  <button type="button" class="sticky-color-dot dot-lilas" data-color="lilas" title="Lilás"></button>
+                </div>
+                <button type="button" class="btn-action btn-add-note" id="btnAddNote"><i class="fa-solid fa-plus"></i> Criar Nota</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="notes-header-list" style="margin-top: 15px;">
+            <h2><i class="fa-solid fa-note-sticky"></i> Anotações Livres</h2>
+          </div>
+          <div id="stickyNotesBoard" class="sticky-board"></div>
         </div>
 
         <div class="hot-ideas-column">
@@ -151,7 +182,7 @@
 
         <div class="settings-card">
           <h2><i class="fa-solid fa-palette"></i> Cor de realce</h2>
-          <p>Muda a cor dos ícones, botões, barras e detalhes.</p>
+          <p>Muda a cor dos ícones, botões, barras e detalhes. Escolha uma pronta ou crie a sua.</p>
           <div class="accent-options">
             <button class="accent-swatch" data-accent="roxo"><span class="accent-dot" style="background: linear-gradient(135deg, #8b5cf6, #ec4899);"></span>Roxo</button>
             <button class="accent-swatch" data-accent="azul"><span class="accent-dot" style="background: linear-gradient(135deg, #3b82f6, #06b6d4);"></span>Azul</button>
@@ -159,7 +190,16 @@
             <button class="accent-swatch" data-accent="laranja"><span class="accent-dot" style="background: linear-gradient(135deg, #f97316, #ef4444);"></span>Laranja</button>
             <button class="accent-swatch" data-accent="rosa"><span class="accent-dot" style="background: linear-gradient(135deg, #ec4899, #d946ef);"></span>Rosa</button>
             <button class="accent-swatch" data-accent="dourado"><span class="accent-dot" style="background: linear-gradient(135deg, #eab308, #f97316);"></span>Dourado</button>
+            <button class="accent-swatch" data-accent="vermelho"><span class="accent-dot" style="background: linear-gradient(135deg, #ef4444, #f43f5e);"></span>Vermelho</button>
+            <div class="accent-swatch accent-swatch-custom" data-accent="custom" title="Escolher outra cor">
+              <div class="accent-custom-wrap">
+                <span class="accent-dot accent-dot-custom"></span>
+                <input type="color" id="accentColorInput" class="accent-color-input" value="#8b5cf6" aria-label="Escolher cor personalizada">
+              </div>
+              Personalizada
+            </div>
           </div>
+          <div id="accentCustomNote" class="accent-custom-note"></div>
         </div>
 
         <div class="settings-card">
@@ -366,7 +406,6 @@
     </div>
   </div>
 
-  <!-- Apenas o javao.js unificado -->
   <script src="javao.js"></script>
   <script>
     if ('serviceWorker' in navigator) {

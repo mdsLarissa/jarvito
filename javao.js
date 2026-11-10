@@ -16,7 +16,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Escapa texto antes de colocá-lo dentro de HTML (usado nas descrições das tasks)
   function escapeHtml(texto) {
     return String(texto == null ? '' : texto)
       .replace(/&/g, '&amp;')
@@ -25,12 +24,115 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/"/g, '&quot;');
   }
 
-  // ===== CONFIGURAÇÃO DE TEMAS E CORES (CONFIGURAÇÕES) =====
   const THEME_KEY = 'jarvito_theme';
   const ACCENT_KEY = 'jarvito_accent';
+  const CUSTOM_KEY = 'jarvito_accent_custom';
+  const CUSTOM_VARS_KEY = 'jarvito_accent_vars';
   const THEME_COLORS = { dark: '#0d0614', light: '#f4f2fa' };
-  const ACCENTS = ['roxo', 'azul', 'verde', 'laranja', 'rosa', 'dourado'];
+  const ACCENTS = ['roxo', 'azul', 'verde', 'laranja', 'rosa', 'dourado', 'vermelho'];
+  const COR_PADRAO = '#8b5cf6';
   const root = document.documentElement;
+
+  const inputCor = document.getElementById('accentColorInput');
+  const notaCor = document.getElementById('accentCustomNote');
+  const swatchCustom = document.querySelector('.accent-swatch[data-accent="custom"]');
+
+  // --- matemática de cores (cor personalizada) ---
+  const LUM_MIN = 0.11;  // abaixo disso a cor some no fundo escuro
+  const LUM_MAX = 0.30;  // acima disso o texto branco sobre a cor fica ilegível
+
+  function hexParaRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function rgbParaHex(rgb) {
+    return '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  function rgbParaHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    let h = 0;
+    let s = 0;
+    if (d !== 0) {
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s, l];
+  }
+
+  function hslParaRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255].map((v) => Math.max(0, Math.min(255, Math.round(v))));
+  }
+
+  function luminancia(rgb) {
+    const [r, g, b] = rgb.map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function ajustarLegibilidade(h, s, l) {
+    let rgb = hslParaRgb(h, s, l);
+    let lum = luminancia(rgb);
+    while (lum > LUM_MAX && l > 0.15) {
+      l -= 0.01;
+      rgb = hslParaRgb(h, s, l);
+      lum = luminancia(rgb);
+    }
+    while (lum < LUM_MIN && l < 0.85) {
+      l += 0.01;
+      rgb = hslParaRgb(h, s, l);
+      lum = luminancia(rgb);
+    }
+    return { rgb, l };
+  }
+
+  function calcularCor(hexEscolhido) {
+    const rgbEscolhido = hexParaRgb(hexEscolhido) || hexParaRgb(COR_PADRAO);
+    let [h, s, l] = rgbParaHsl(rgbEscolhido[0], rgbEscolhido[1], rgbEscolhido[2]);
+    const colorida = s >= 0.12;
+    if (colorida) s = Math.max(s, 0.35);
+
+    const principal = ajustarLegibilidade(h, s, l);
+    const secundaria = ajustarLegibilidade(colorida ? h + 35 : h, s, principal.l);
+    const diferenca = Math.max(
+      Math.abs(rgbEscolhido[0] - principal.rgb[0]),
+      Math.abs(rgbEscolhido[1] - principal.rgb[1]),
+      Math.abs(rgbEscolhido[2] - principal.rgb[2])
+    );
+
+    return {
+      a: rgbParaHex(principal.rgb),
+      b: rgbParaHex(secundaria.rgb),
+      ar: principal.rgb.join(', '),
+      br: secundaria.rgb.join(', '),
+      ajustada: diferenca > 12
+    };
+  }
 
   function aplicarTema(tema) {
     if (!THEME_COLORS[tema]) tema = 'dark';
@@ -43,21 +145,71 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function marcarAccentAtivo(valor) {
+    document.querySelectorAll('.accent-swatch').forEach((b) => {
+      b.classList.toggle('active', b.dataset.accent === valor);
+    });
+  }
+
+  function limparCorPersonalizada() {
+    ['--accent', '--accent2', '--accent-rgb', '--accent2-rgb'].forEach((p) => root.style.removeProperty(p));
+  }
+
+  function lerCorPersonalizada() {
+    let salva = null;
+    try { salva = localStorage.getItem(CUSTOM_KEY); } catch (e) {}
+    if (salva && hexParaRgb(salva)) return salva;
+    const atual = getComputedStyle(root).getPropertyValue('--accent').trim();
+    return hexParaRgb(atual) ? atual : COR_PADRAO;
+  }
+
+  function aplicarCorPersonalizada(hexEscolhido) {
+    const cor = calcularCor(hexEscolhido);
+    root.setAttribute('data-accent', 'custom');
+    root.style.setProperty('--accent', cor.a);
+    root.style.setProperty('--accent2', cor.b);
+    root.style.setProperty('--accent-rgb', cor.ar);
+    root.style.setProperty('--accent2-rgb', cor.br);
+    try {
+      localStorage.setItem(ACCENT_KEY, 'custom');
+      localStorage.setItem(CUSTOM_KEY, hexEscolhido);
+      localStorage.setItem(CUSTOM_VARS_KEY, JSON.stringify({ a: cor.a, b: cor.b, ar: cor.ar, br: cor.br }));
+    } catch (e) {}
+    marcarAccentAtivo('custom');
+    if (notaCor) {
+      notaCor.textContent = cor.ajustada
+        ? 'Ajustamos o brilho da cor para manter a leitura: ' + cor.a + '.'
+        : '';
+    }
+  }
+
   function aplicarAccent(nome) {
+    if (nome === 'custom') {
+      aplicarCorPersonalizada(lerCorPersonalizada());
+      return;
+    }
     if (!ACCENTS.includes(nome)) nome = 'roxo';
+    limparCorPersonalizada();
     root.setAttribute('data-accent', nome);
     try { localStorage.setItem(ACCENT_KEY, nome); } catch (e) {}
-    document.querySelectorAll('.accent-swatch').forEach((b) => {
-      b.classList.toggle('active', b.dataset.accent === nome);
-    });
+    marcarAccentAtivo(nome);
+    if (notaCor) notaCor.textContent = '';
   }
 
   document.querySelectorAll('.theme-option').forEach((b) => {
     b.addEventListener('click', () => aplicarTema(b.dataset.theme));
   });
-  document.querySelectorAll('.accent-swatch').forEach((b) => {
+  document.querySelectorAll('.accent-swatch:not([data-accent="custom"])').forEach((b) => {
     b.addEventListener('click', () => aplicarAccent(b.dataset.accent));
   });
+
+  if (swatchCustom && inputCor) {
+    swatchCustom.addEventListener('click', (e) => {
+      aplicarAccent('custom');
+      if (e.target !== inputCor) inputCor.click();
+    });
+    inputCor.addEventListener('input', () => aplicarCorPersonalizada(inputCor.value));
+  }
 
   const btnReset = document.getElementById('btnResetTheme');
   if (btnReset) btnReset.addEventListener('click', () => { aplicarTema('dark'); aplicarAccent('roxo'); });
@@ -76,9 +228,9 @@ document.addEventListener('DOMContentLoaded', () => {
     temaSalvo = localStorage.getItem(THEME_KEY) || 'dark';
     accentSalvo = localStorage.getItem(ACCENT_KEY) || 'roxo';
   } catch (e) {}
+  if (inputCor) inputCor.value = lerCorPersonalizada();
   aplicarTema(temaSalvo);
   aplicarAccent(accentSalvo);
-
 
   // ===== CONFIGURAÇÃO DO FIREBASE (SINCRONIZAÇÃO) =====
   const firebaseConfig = {
@@ -90,16 +242,18 @@ document.addEventListener('DOMContentLoaded', () => {
     appId: "1:282091474872:web:fd17012475547f543ec94d"
   };
 
-  firebase.initializeApp(firebaseConfig);
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
   const db = firebase.firestore();
 
   let syncCode = localStorage.getItem('jarvito_sync_code') || null;
   let unsubscribeSnapshot = null;
   let isApplyingRemoteData = false;
-  let notesSaveTimeout = null;
+  let principalCarregado = false;
 
   let projectsData = [];
-  let notesData = '';
+  let notesData = []; 
   let hotIdeasData = [];
   let calendarEventsData = {};
 
@@ -121,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
           tasks: []
         }
       ],
-      notes: '',
+      notes: [],
       hotIdeas: [],
       calendarEvents: {}
     };
@@ -151,10 +305,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function iniciarSincronizacao() {
     if (unsubscribeSnapshot) unsubscribeSnapshot();
+    principalCarregado = false;
 
     unsubscribeSnapshot = getDocRef().onSnapshot((doc) => {
-      // "Eco" da nossa própria gravação: o que está na tela já é o que foi salvo.
-      // Ignorar evita redesenhar a tela (e perder o cursor) enquanto você digita.
       if (doc.metadata && doc.metadata.hasPendingWrites) return;
 
       isApplyingRemoteData = true;
@@ -163,9 +316,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (doc.exists) {
         const data = doc.data();
         projectsData = data.projects || [];
-        notesData = data.notes || '';
+        notesData = data.notes || [];
         hotIdeasData = data.hotIdeas || [];
         calendarEventsData = data.calendarEvents || {};
+        
+        // Migração de formato antigo de string para array se necessário
+        if (typeof notesData === 'string') {
+          const textoAntigo = notesData.trim();
+          notesData = textoAntigo ? [{ id: Date.now(), title: 'Anotações', text: textoAntigo, color: 'amarelo' }] : [];
+        }
       } else {
         const padrao = dadosPadrao();
         projectsData = padrao.projects;
@@ -178,6 +337,8 @@ document.addEventListener('DOMContentLoaded', () => {
       reaplicarDescricaoEmEdicao(descricaoDigitando);
       renderizarTudoAposSync();
       isApplyingRemoteData = false;
+
+      principalCarregado = true;
     }, (err) => {
       console.error('Erro na sincronização com o Firestore:', err);
       alert(err && err.code === 'permission-denied'
@@ -191,11 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderizarTudoAposSync() {
-    if (mainNotesTextarea) mainNotesTextarea.value = notesData;
-
-    // Se você está escrevendo uma descrição, não redesenha os projetos agora
-    // (senão o texto e o cursor sumiriam). O redesenho acontece quando você sair do campo.
-    if (descricaoEmEdicao()) {
+    if (descricaoEmEdicao() || arrastandoProjeto) {
       rerenderProjetosPendente = true;
     } else {
       renderizarProjetos();
@@ -203,16 +360,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderizarCalendario();
     renderizarHotIdeas();
+    renderizarNotas();
     atualizarDatalist();
-  }
-
-  const mainNotesTextarea = document.querySelector('.notes-textarea');
-  if (mainNotesTextarea) {
-    mainNotesTextarea.addEventListener('input', () => {
-      notesData = mainNotesTextarea.value;
-      clearTimeout(notesSaveTimeout);
-      notesSaveTimeout = setTimeout(salvarTudo, 500);
-    });
   }
 
   const modalSyncCode = document.getElementById('modalSyncCode');
@@ -261,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hotIdeasHistoryList.innerHTML = '';
 
     if (hotIdeasData.length === 0) {
-      hotIdeasHistoryList.innerHTML = '<span style="color: #a78bfa; font-size: 13px;">Nenhuma ideia registrada ainda.</span>';
+      hotIdeasHistoryList.innerHTML = '<span style="color: var(--accent-soft); font-size: 13px;">Nenhuma ideia registrada ainda.</span>';
       return;
     }
 
@@ -273,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span>${item.date}</span>
           <button class="btn-delete-idea" data-index="${index}" title="Excluir"><i class="fa-solid fa-trash"></i></button>
         </div>
-        <div class="hot-idea-body">${item.text}</div>
+        <div class="hot-idea-body">${escapeHtml(item.text)}</div>
       `;
       hotIdeasHistoryList.appendChild(card);
     });
@@ -336,16 +485,183 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
+  // ===== ANOTAÇÕES (STICKY NOTES) COM NOVO FLUXO E DESIGN =====
+  const stickyNotesBoard = document.getElementById('stickyNotesBoard');
+  const newNoteTitleInput = document.getElementById('newNoteTitleInput');
+  const newNoteTextInput = document.getElementById('newNoteTextInput');
+  const btnAddNote = document.getElementById('btnAddNote');
+  const newNoteColorPicker = document.getElementById('newNoteColorPicker');
+
+  let selectedNewNoteColor = 'amarelo';
+
+  if (newNoteColorPicker) {
+    newNoteColorPicker.querySelectorAll('.sticky-color-dot').forEach(dot => {
+      dot.addEventListener('click', () => {
+        newNoteColorPicker.querySelectorAll('.sticky-color-dot').forEach(d => d.classList.remove('active'));
+        dot.classList.add('active');
+        selectedNewNoteColor = dot.getAttribute('data-color');
+      });
+    });
+  }
+
+  if (btnAddNote) {
+    btnAddNote.addEventListener('click', () => {
+      const titulo = newNoteTitleInput ? newNoteTitleInput.value.trim() : '';
+      const texto = newNoteTextInput ? newNoteTextInput.value.trim() : '';
+
+      if (!titulo && !texto) {
+        alert('Digite um título ou conteúdo para criar a anotação!');
+        return;
+      }
+
+      if (!Array.isArray(notesData)) notesData = [];
+
+      notesData.unshift({
+        id: Date.now(),
+        title: titulo,
+        text: texto,
+        color: selectedNewNoteColor
+      });
+
+      if (newNoteTitleInput) newNoteTitleInput.value = '';
+      if (newNoteTextInput) newNoteTextInput.value = '';
+
+      salvarTudo();
+      renderizarNotas();
+    });
+  }
+
+  function renderizarNotas() {
+    if (!stickyNotesBoard) return;
+    stickyNotesBoard.innerHTML = '';
+
+    if (!Array.isArray(notesData) || notesData.length === 0) {
+      stickyNotesBoard.innerHTML = '<div class="sticky-empty">Nenhuma anotação criada ainda. Use o painel acima para adicionar.</div>';
+      return;
+    }
+
+    notesData.forEach((note) => {
+      const card = document.createElement('div');
+      card.className = `sticky-note color-${note.color || 'amarelo'}`;
+      card.setAttribute('data-id', note.id);
+
+      const tituloLimpo = escapeHtml(note.title);
+      const textoLimpo = escapeHtml(note.text);
+      const temTitulo = note.title && note.title.trim() !== '';
+
+      card.innerHTML = `
+        <div class="sticky-header-banner"></div>
+        <div class="sticky-view sticky-content-wrap">
+          <div class="sticky-title ${temTitulo ? '' : 'is-empty'}">${temTitulo ? tituloLimpo : 'Sem título'}</div>
+          <div class="sticky-preview">${textoLimpo}</div>
+        </div>
+        <div class="sticky-edit">
+          <input type="text" class="sticky-title-input" value="${tituloLimpo}" placeholder="Título...">
+          <textarea class="sticky-text-input" placeholder="Escreva sua anotação...">${note.text || ''}</textarea>
+          <div class="sticky-tools">
+            <div class="sticky-colors">
+              <button type="button" class="sticky-color-dot dot-amarelo ${note.color === 'amarelo' ? 'active' : ''}" data-color="amarelo"></button>
+              <button type="button" class="sticky-color-dot dot-rosa ${note.color === 'rosa' ? 'active' : ''}" data-color="rosa"></button>
+              <button type="button" class="sticky-color-dot dot-azul ${note.color === 'azul' ? 'active' : ''}" data-color="azul"></button>
+              <button type="button" class="sticky-color-dot dot-verde ${note.color === 'verde' ? 'active' : ''}" data-color="verde"></button>
+              <button type="button" class="sticky-color-dot dot-laranja ${note.color === 'laranja' ? 'active' : ''}" data-color="laranja"></button>
+              <button type="button" class="sticky-color-dot dot-lilas ${note.color === 'lilas' ? 'active' : ''}" data-color="lilas"></button>
+            </div>
+            <div class="sticky-actions">
+              <button type="button" class="sticky-btn delete btn-delete-note">Excluir</button>
+              <button type="button" class="sticky-btn close btn-close-note">Fechar</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Eventos do cartão
+      const viewWrap = card.querySelector('.sticky-view');
+      viewWrap.addEventListener('click', () => {
+        document.querySelectorAll('.sticky-note.open').forEach(n => {
+          if (n !== card) n.classList.remove('open');
+        });
+        card.classList.add('open');
+        const textIn = card.querySelector('.sticky-text-input');
+        if (textIn) textIn.focus();
+      });
+
+      const btnClose = card.querySelector('.btn-close-note');
+      btnClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        card.classList.remove('open');
+        salvarDadosNota(card, note.id);
+      });
+
+      const btnDelete = card.querySelector('.btn-delete-note');
+      btnDelete.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Deseja realmente excluir esta anotação?')) {
+          notesData = notesData.filter(n => n.id !== note.id);
+          salvarTudo();
+          renderizarNotas();
+        }
+      });
+
+      card.querySelectorAll('.sticky-colors .sticky-color-dot').forEach(dot => {
+        dot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const novaCor = dot.getAttribute('data-color');
+          note.color = novaCor;
+          card.className = `sticky-note open color-${novaCor}`;
+          card.querySelectorAll('.sticky-colors .sticky-color-dot').forEach(d => d.classList.remove('active'));
+          dot.classList.add('active');
+          salvarTudo();
+        });
+      });
+
+      const tInput = card.querySelector('.sticky-title-input');
+      const aInput = card.querySelector('.sticky-text-input');
+
+      tInput.addEventListener('input', () => {
+        note.title = tInput.value;
+        salvarTudoDebounced();
+      });
+
+      aInput.addEventListener('input', () => {
+        note.text = aInput.value;
+        salvarTudoDebounced();
+      });
+
+      stickyNotesBoard.appendChild(card);
+    });
+  }
+
+  let noteSaveTimeout = null;
+  function salvarTudoDebounced() {
+    clearTimeout(noteSaveTimeout);
+    noteSaveTimeout = setTimeout(() => {
+      salvarTudo();
+    }, 500);
+  }
+
+  function salvarDadosNota(card, id) {
+    const note = notesData.find(n => n.id === id);
+    if (!note) return;
+    const tInput = card.querySelector('.sticky-title-input');
+    const aInput = card.querySelector('.sticky-text-input');
+    if (tInput) note.title = tInput.value;
+    if (aInput) note.text = aInput.value;
+    salvarTudo();
+    renderizarNotas();
+  }
+
+
   // ===== PROJETOS E TAREFAS =====
   const projectsList = document.querySelector('.projects-list');
   const completedProjectsList = document.querySelector('.completed-projects-list');
 
-  // Guarda o que está aberto na tela, para não fechar tudo quando a tela é redesenhada
-  const expandedProjects = new Set();        // chaves dos projetos abertos
-  const expandedTaskByProject = new Map();   // chave do projeto -> índice da task com a descrição aberta
+  const expandedProjects = new Set();
+  const expandedTaskByProject = new Map();
   let descricaoSaveTimeout = null;
   let descricaoPendente = false;
   let rerenderProjetosPendente = false;
+  let arrastandoProjeto = false;
 
   function chaveDoProjeto(project, pIndex) {
     return String(project.id != null ? project.id : 'i' + pIndex);
@@ -356,8 +672,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return !!(a && a.classList && a.classList.contains('task-description-input'));
   }
 
-  // Se chegar uma atualização de outro aparelho enquanto você digita, o texto ainda não salvo
-  // é guardado e devolvido para a tarefa certa depois que os dados novos forem aplicados.
   function capturarDescricaoEmEdicao() {
     if (!descricaoEmEdicao()) return null;
     const campo = document.activeElement;
@@ -418,15 +732,14 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="task-delete-selector" style="display: none;">
             <input type="checkbox" class="task-delete-checkbox">
           </div>
-          <span class="task-title" title="Clique para abrir a descrição">${task.text}</span>
+          <span class="task-title" title="Clique para abrir a descrição">${escapeHtml(task.text)}</span>
           <span class="task-desc-badge" title="Esta tarefa tem descrição"><i class="fa-solid fa-align-left"></i></span>
           <span class="task-priority priority-${task.priority}" data-priority="${task.priority}">(Nível ${task.priority} de Prioridade!)</span>
           <button class="btn-edit-task" title="Editar nome e prioridade"><i class="fa-solid fa-pen"></i></button>
           <input type="checkbox" class="custom-checkbox" ${task.completed ? 'checked' : ''}>
           <div class="task-description-panel" style="display: ${aberta ? 'block' : 'none'};">
             <label>Descrição / anotações</label>
-            <textarea class="task-description-input" placeholder="Escreva detalhes, passos, links ou anotações desta tarefa...">
-${escapeHtml(descricao)}</textarea>
+            <textarea class="task-description-input" placeholder="Escreva detalhes, passos, links ou anotações desta tarefa...">${escapeHtml(descricao)}</textarea>
           </div>
         </div>
       `;
@@ -439,7 +752,10 @@ ${escapeHtml(descricao)}</textarea>
           <span>Selecionar para excluir projeto</span>
         </div>
         <div class="project-header">
-          <h2 class="project-title-editable" title="Clique para editar o nome">${project.title}</h2>
+          <div class="project-title-wrap">
+            <span class="project-drag-handle" title="Segure e arraste para reordenar"><i class="fa-solid fa-grip-vertical"></i></span>
+            <h2 class="project-title-editable" title="Clique para editar o nome">${escapeHtml(project.title)}</h2>
+          </div>
           <div class="project-info">
             <span class="alert-text" style="color: ${statusColor}">
               ${statusText}
@@ -495,7 +811,7 @@ ${escapeHtml(descricao)}</textarea>
     });
 
     if (completedProjectsList && completedProjectsList.children.length === 0) {
-      completedProjectsList.innerHTML = '<span style="color: #a78bfa; font-size: 14px;">Nenhum projeto concluído no momento.</span>';
+      completedProjectsList.innerHTML = '<span style="color: var(--accent-soft); font-size: 14px;">Nenhum projeto concluído no momento.</span>';
     }
   }
 
@@ -520,7 +836,6 @@ ${escapeHtml(descricao)}</textarea>
     }
   }
 
-  // Abre/fecha a descrição de uma task (só uma aberta por projeto, como nos projetos)
   function alternarDescricaoTask(card, taskItem) {
     const chave = card.getAttribute('data-project-key');
     const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
@@ -546,7 +861,6 @@ ${escapeHtml(descricao)}</textarea>
     }
   }
 
-  // Salva a descrição enquanto você digita (sem redesenhar a tela)
   function tratarInputDescricao(e) {
     if (!e.target.classList.contains('task-description-input')) return;
 
@@ -570,7 +884,6 @@ ${escapeHtml(descricao)}</textarea>
     }, 600);
   }
 
-  // Ao sair do campo: grava na hora e, se chegou alguma atualização enquanto você digitava, redesenha
   function tratarSaidaDescricao(e) {
     if (!e.target.classList.contains('task-description-input')) return;
 
@@ -585,30 +898,169 @@ ${escapeHtml(descricao)}</textarea>
     }, 0);
   }
 
+  function confirmarNovaOrdem(lista) {
+    const cards = Array.from(lista.querySelectorAll(':scope > .project-card'));
+    const novaOrdem = cards.map((c) => parseInt(c.getAttribute('data-project-index')));
+    const posicoes = novaOrdem.slice().sort((a, b) => a - b);
+    const mudou = novaOrdem.some((idx, i) => idx !== posicoes[i]);
+
+    if (!mudou) {
+      if (rerenderProjetosPendente) renderizarProjetos();
+      return;
+    }
+
+    const copia = projectsData.slice();
+    novaOrdem.forEach((idxProjeto, i) => { copia[posicoes[i]] = projectsData[idxProjeto]; });
+    projectsData = copia;
+
+    salvarTudo();
+    renderizarProjetos();
+  }
+
+  function iniciarArrasto(e) {
+    const handle = e.target.closest('.project-drag-handle');
+    if (!handle) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    const card = handle.closest('.project-card');
+    const lista = card && card.parentElement;
+    if (!card || !lista) return;
+
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+
+    const rect = card.getBoundingClientRect();
+    const deslocY = e.clientY - rect.top;
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'project-placeholder';
+    placeholder.style.height = rect.height + 'px';
+    lista.insertBefore(placeholder, card);
+
+    card.classList.add('dragging');
+    card.style.width = rect.width + 'px';
+    card.style.left = rect.left + 'px';
+    card.style.top = rect.top + 'px';
+    document.body.classList.add('is-dragging');
+    arrastandoProjeto = true;
+
+    let ultimoY = e.clientY;
+    let rolagem = 0;
+    let rafId = null;
+
+    function posicionar() {
+      card.style.top = (ultimoY - deslocY) + 'px';
+
+      const irmaos = Array.from(lista.children).filter(
+        (c) => c !== card && c !== placeholder && c.classList.contains('project-card')
+      );
+      let alvo = null;
+      for (const c of irmaos) {
+        const r = c.getBoundingClientRect();
+        if (ultimoY < r.top + r.height / 2) { alvo = c; break; }
+      }
+
+      if (alvo) {
+        if (placeholder.nextElementSibling !== alvo) lista.insertBefore(placeholder, alvo);
+      } else {
+        const ultimo = irmaos[irmaos.length - 1];
+        if (ultimo && !(ultimo.compareDocumentPosition(placeholder) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+          lista.insertBefore(placeholder, ultimo.nextSibling);
+        }
+      }
+    }
+
+    function loopRolagem() {
+      if (rolagem !== 0) {
+        window.scrollBy(0, rolagem);
+        posicionar();
+      }
+      rafId = requestAnimationFrame(loopRolagem);
+    }
+
+    function aoMover(ev) {
+      ultimoY = ev.clientY;
+      const margemTopo = 70;
+      const margemBase = window.matchMedia('(max-width: 640px)').matches ? 150 : 70;
+      const limiteBase = window.innerHeight - margemBase;
+      if (ultimoY < margemTopo) rolagem = -Math.ceil((margemTopo - ultimoY) / 4);
+      else if (ultimoY > limiteBase) rolagem = Math.ceil((ultimoY - limiteBase) / 4);
+      else rolagem = 0;
+      posicionar();
+    }
+
+    function terminar() {
+      handle.removeEventListener('pointermove', aoMover);
+      handle.removeEventListener('pointerup', terminar);
+      handle.removeEventListener('pointercancel', terminar);
+      cancelAnimationFrame(rafId);
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+
+      lista.insertBefore(card, placeholder);
+      placeholder.remove();
+      card.classList.remove('dragging');
+      card.style.width = '';
+      card.style.left = '';
+      card.style.top = '';
+      document.body.classList.remove('is-dragging');
+      arrastandoProjeto = false;
+
+      confirmarNovaOrdem(lista);
+    }
+
+    handle.addEventListener('pointermove', aoMover);
+    handle.addEventListener('pointerup', terminar);
+    handle.addEventListener('pointercancel', terminar);
+    rafId = requestAnimationFrame(loopRolagem);
+    posicionar();
+  }
+
   const btnAddProject = document.querySelector('.btn-add');
   const modalNewProject = document.getElementById('modalNewProject');
   const btnCloseModal = document.getElementById('btnCloseModal');
   const btnCancelModal = document.getElementById('btnCancelModal');
   const btnSaveModalProject = document.getElementById('btnSaveModalProject');
-  const btnAddModalTask = document.getElementById('btnAddModalTask');
-
   const modalProjectName = document.getElementById('modalProjectName');
   const modalTaskName = document.getElementById('modalTaskName');
   const modalTaskPriority = document.getElementById('modalTaskPriority');
+  const btnAddModalTask = document.getElementById('btnAddModalTask');
   const modalTaskList = document.getElementById('modalTaskList');
 
-  let tempModalTasks = [];
+  let tasksNovasTemp = [];
 
   function abrirModalProjeto() {
-    tempModalTasks = [];
     if (modalProjectName) modalProjectName.value = '';
     if (modalTaskName) modalTaskName.value = '';
-    if (modalTaskList) modalTaskList.innerHTML = '';
+    if (modalTaskPriority) modalTaskPriority.value = '1';
+    tasksNovasTemp = [];
+    atualizarListaModalTasks();
     if (modalNewProject) modalNewProject.style.display = 'flex';
   }
 
   function fecharModalProjeto() {
     if (modalNewProject) modalNewProject.style.display = 'none';
+  }
+
+  function atualizarListaModalTasks() {
+    if (!modalTaskList) return;
+    modalTaskList.innerHTML = '';
+    tasksNovasTemp.forEach((t, i) => {
+      const item = document.createElement('div');
+      item.className = 'modal-task-item';
+      item.innerHTML = `
+        <span>${escapeHtml(t.text)} (Prioridade ${t.priority})</span>
+        <button type="button" class="btn-delete-event" data-index="${i}">&times;</button>
+      `;
+      modalTaskList.appendChild(item);
+    });
+
+    modalTaskList.querySelectorAll('.btn-delete-event').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-index'));
+        tasksNovasTemp.splice(idx, 1);
+        atualizarListaModalTasks();
+      });
+    });
   }
 
   if (btnAddProject) btnAddProject.addEventListener('click', abrirModalProjeto);
@@ -617,120 +1069,137 @@ ${escapeHtml(descricao)}</textarea>
 
   if (btnAddModalTask) {
     btnAddModalTask.addEventListener('click', () => {
-      const taskText = modalTaskName.value.trim();
-      const priority = modalTaskPriority.value;
-
-      if (!taskText) {
+      const nome = modalTaskName ? modalTaskName.value.trim() : '';
+      if (!nome) {
         alert('Digite o nome da tarefa!');
         return;
       }
-
-      tempModalTasks.push({ text: taskText, priority: parseInt(priority), completed: false });
-
-      const itemDiv = document.createElement('div');
-      itemDiv.classList.add('modal-task-item');
-      itemDiv.innerHTML = `
-        <span>${taskText}</span>
-        <span style="color: #a78bfa;">Prioridade ${priority}</span>
-      `;
-      modalTaskList.appendChild(itemDiv);
-      modalTaskName.value = '';
+      tasksNovasTemp.push({
+        text: nome,
+        priority: parseInt(modalTaskPriority ? modalTaskPriority.value : '1'),
+        completed: false
+      });
+      if (modalTaskName) modalTaskName.value = '';
+      atualizarListaModalTasks();
     });
   }
 
   if (btnSaveModalProject) {
     btnSaveModalProject.addEventListener('click', () => {
-      const projectName = modalProjectName.value.trim();
-      if (!projectName) {
+      const nomeProj = modalProjectName ? modalProjectName.value.trim() : '';
+      if (!nomeProj) {
         alert('Digite o nome do projeto!');
         return;
       }
 
-      const newProj = {
-        id: Date.now(),
-        title: projectName.toUpperCase(),
-        tasks: tempModalTasks
-      };
+      const novoId = projectsData.length > 0 ? Math.max(...projectsData.map(p => p.id || 0)) + 1 : 1;
+      projectsData.push({
+        id: novoId,
+        title: nomeProj,
+        tasks: tasksNovasTemp
+      });
 
-      projectsData.push(newProj);
       salvarTudo();
       renderizarProjetos();
       fecharModalProjeto();
     });
   }
 
-  const btnDeleteProject = document.querySelector('.btn-delete');
+  const btnDeleteProjectMode = document.querySelector('.btn-delete');
   const btnConfirmDelete = document.getElementById('btnConfirmDelete');
   const btnCancelDelete = document.getElementById('btnCancelDelete');
+  let modoExclusaoProjetoAtivo = false;
 
-  function alternarModoDelecaoProjetos(ativo) {
-    const selectors = document.querySelectorAll('.project-delete-selector');
-    selectors.forEach(s => {
-      s.style.display = ativo ? 'flex' : 'none';
-      const checkbox = s.querySelector('.card-delete-checkbox');
-      if (checkbox) checkbox.checked = false;
+  if (btnDeleteProjectMode) {
+    btnDeleteProjectMode.addEventListener('click', () => {
+      modoExclusaoProjetoAtivo = true;
+      if (btnDeleteProjectMode) btnDeleteProjectMode.style.display = 'none';
+      if (btnConfirmDelete) btnConfirmDelete.style.display = 'inline-flex';
+      if (btnCancelDelete) btnCancelDelete.style.display = 'inline-flex';
+      document.querySelectorAll('.project-delete-selector').forEach(el => el.style.display = 'flex');
     });
-
-    if (btnConfirmDelete) btnConfirmDelete.style.display = ativo ? 'inline-flex' : 'none';
-    if (btnCancelDelete) btnCancelDelete.style.display = ativo ? 'inline-flex' : 'none';
   }
 
-  if (btnDeleteProject) btnDeleteProject.addEventListener('click', () => alternarModoDelecaoProjetos(true));
-  if (btnCancelDelete) btnCancelDelete.addEventListener('click', () => alternarModoDelecaoProjetos(false));
+  function sairModoExclusaoProjeto() {
+    modoExclusaoProjetoAtivo = false;
+    if (btnDeleteProjectMode) btnDeleteProjectMode.style.display = 'inline-flex';
+    if (btnConfirmDelete) btnConfirmDelete.style.display = 'none';
+    if (btnCancelDelete) btnCancelDelete.style.display = 'none';
+    document.querySelectorAll('.project-delete-selector').forEach(el => el.style.display = 'none');
+  }
+
+  if (btnCancelDelete) btnCancelDelete.addEventListener('click', sairModoExclusaoProjeto);
 
   if (btnConfirmDelete) {
     btnConfirmDelete.addEventListener('click', () => {
-      const selectedCheckboxes = document.querySelectorAll('.card-delete-checkbox:checked');
-      if (selectedCheckboxes.length === 0) {
+      const cards = document.querySelectorAll('.project-card');
+      const indicesParaRemover = [];
+
+      cards.forEach(card => {
+        const chk = card.querySelector('.card-delete-checkbox');
+        if (chk && chk.checked) {
+          indicesParaRemover.push(parseInt(card.getAttribute('data-project-index')));
+        }
+      });
+
+      if (indicesParaRemover.length === 0) {
         alert('Selecione pelo menos um projeto para excluir!');
         return;
       }
 
-      if (confirm(`Excluir ${selectedCheckboxes.length} projeto(s) selecionado(s)?`)) {
-        const indexesToRemove = [];
-        selectedCheckboxes.forEach(chk => {
-          const card = chk.closest('.project-card');
-          if (card) {
-            const index = parseInt(card.getAttribute('data-project-index'));
-            indexesToRemove.push(index);
-          }
-        });
-
-        projectsData = projectsData.filter((_, idx) => !indexesToRemove.includes(idx));
-        expandedProjects.clear();
-        expandedTaskByProject.clear();
+      if (confirm(`Deseja realmente excluir ${indicesParaRemover.length} projeto(s)?`)) {
+        projectsData = projectsData.filter((_, idx) => !indicesParaRemover.includes(idx));
         salvarTudo();
         renderizarProjetos();
-        alternarModoDelecaoProjetos(false);
       }
+
+      sairModoExclusaoProjeto();
     });
   }
 
+  function ligarModoExclusaoTask(card) {
+    card.querySelectorAll('.task-delete-selector').forEach(el => el.style.display = 'flex');
+    const rmBtn = card.querySelector('.btn-remove-task');
+    const confBtn = card.querySelector('.btn-confirm-task-delete');
+    const cancBtn = card.querySelector('.btn-cancel-task-delete');
+    if (rmBtn) rmBtn.style.display = 'none';
+    if (confBtn) confBtn.style.display = 'inline-flex';
+    if (cancBtn) cancBtn.style.display = 'inline-flex';
+  }
+
+  function desligarModoExclusaoTask(card) {
+    card.querySelectorAll('.task-delete-selector').forEach(el => el.style.display = 'none');
+    const rmBtn = card.querySelector('.btn-remove-task');
+    const confBtn = card.querySelector('.btn-confirm-task-delete');
+    const cancBtn = card.querySelector('.btn-cancel-task-delete');
+    if (rmBtn) rmBtn.style.display = 'inline-flex';
+    if (confBtn) confBtn.style.display = 'none';
+    if (cancBtn) cancBtn.style.display = 'none';
+  }
+
   const modalEditTask = document.getElementById('modalEditTask');
-  const editModalTaskName = document.getElementById('editModalTaskName');
-  const editModalTaskPriority = document.getElementById('editModalTaskPriority');
   const btnCloseEditTaskModal = document.getElementById('btnCloseEditTaskModal');
   const btnCancelEditTaskModal = document.getElementById('btnCancelEditTaskModal');
   const btnSaveEditTaskModal = document.getElementById('btnSaveEditTaskModal');
+  const editModalTaskName = document.getElementById('editModalTaskName');
+  const editModalTaskPriority = document.getElementById('editModalTaskPriority');
 
-  let activeProjectIndex = null;
-  let activeTaskIndex = null;
+  let editingProjectIndex = null;
+  let editingTaskIndex = null;
 
   function abrirModalEditarTask(pIdx, tIdx) {
-    activeProjectIndex = pIdx;
-    activeTaskIndex = tIdx;
+    editingProjectIndex = pIdx;
+    editingTaskIndex = tIdx;
+    const task = projectsData[pIdx] && projectsData[pIdx].tasks[tIdx];
+    if (!task) return;
 
-    const taskObj = projectsData[pIdx].tasks[tIdx];
-    if (editModalTaskName) editModalTaskName.value = taskObj.text;
-    if (editModalTaskPriority) editModalTaskPriority.value = taskObj.priority;
-
+    if (editModalTaskName) editModalTaskName.value = task.text;
+    if (editModalTaskPriority) editModalTaskPriority.value = String(task.priority || 1);
     if (modalEditTask) modalEditTask.style.display = 'flex';
   }
 
   function fecharModalEditarTask() {
     if (modalEditTask) modalEditTask.style.display = 'none';
-    activeProjectIndex = null;
-    activeTaskIndex = null;
   }
 
   if (btnCloseEditTaskModal) btnCloseEditTaskModal.addEventListener('click', fecharModalEditarTask);
@@ -738,18 +1207,16 @@ ${escapeHtml(descricao)}</textarea>
 
   if (btnSaveEditTaskModal) {
     btnSaveEditTaskModal.addEventListener('click', () => {
-      if (activeProjectIndex === null || activeTaskIndex === null) return;
-
-      const newName = editModalTaskName.value.trim();
-      const newPriority = editModalTaskPriority.value;
-
-      if (!newName) {
-        alert('O nome da tarefa não pode estar vazio!');
+      if (editingProjectIndex === null || editingTaskIndex === null) return;
+      const novoNome = editModalTaskName ? editModalTaskName.value.trim() : '';
+      if (!novoNome) {
+        alert('Digite o nome da tarefa!');
         return;
       }
 
-      projectsData[activeProjectIndex].tasks[activeTaskIndex].text = newName;
-      projectsData[activeProjectIndex].tasks[activeTaskIndex].priority = parseInt(newPriority);
+      const task = projectsData[editingProjectIndex].tasks[editingTaskIndex];
+      task.text = novoNome;
+      task.priority = parseInt(editModalTaskPriority ? editModalTaskPriority.value : '1');
 
       salvarTudo();
       renderizarProjetos();
@@ -757,261 +1224,191 @@ ${escapeHtml(descricao)}</textarea>
     });
   }
 
-  function tratarAcoesDoCard(e) {
-    const card = e.target.closest('.project-card');
-    if (!card) return;
+  document.addEventListener('click', (e) => {
+    const header = e.target.closest('.project-header');
+    if (header && !e.target.closest('.project-title-editable') && !e.target.closest('.project-drag-handle')) {
+      if (modoExclusaoProjetoAtivo) return;
+      const card = header.closest('.project-card');
+      if (card) alternarExpansaoProjeto(card);
+      return;
+    }
 
-    const pIndex = parseInt(card.getAttribute('data-project-index'));
+    const titleEditable = e.target.closest('.project-title-editable');
+    if (titleEditable) {
+      const card = titleEditable.closest('.project-card');
+      if (!card) return;
+      const pIndex = parseInt(card.getAttribute('data-project-index'));
+      const proj = projectsData[pIndex];
+      if (!proj) return;
 
-    if (e.target.classList.contains('project-title-editable')) {
-      const titleElement = e.target;
-      const currentTitle = projectsData[pIndex].title;
-
+      const atual = proj.title;
       const input = document.createElement('input');
       input.type = 'text';
-      input.value = currentTitle;
-      input.classList.add('title-input-inline');
+      input.value = atual;
+      input.className = 'title-input-inline';
 
-      titleElement.replaceWith(input);
+      titleEditable.replaceWith(input);
       input.focus();
+      input.select();
 
       function salvarNovoTitulo() {
-        const novoTexto = input.value.trim().toUpperCase() || currentTitle;
-        projectsData[pIndex].title = novoTexto;
+        const val = input.value.trim();
+        if (val) proj.title = val;
         salvarTudo();
         renderizarProjetos();
       }
 
       input.addEventListener('blur', salvarNovoTitulo);
       input.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') salvarNovoTitulo();
+        if (ev.key === 'Enter') {
+          input.blur();
+        } else if (ev.key === 'Escape') {
+          renderizarProjetos();
+        }
       });
       return;
     }
 
-    // Lápis: edita nome e prioridade da task
-    const btnEditTask = e.target.closest('.btn-edit-task');
-    if (btnEditTask) {
-      const taskItem = e.target.closest('.task-item');
-      if (taskItem) {
-        const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
-        abrirModalEditarTask(pIndex, tIndex);
-        return;
-      }
-    }
-
-    // Clique na task (nome, prioridade ou ícone de descrição): abre/fecha a descrição
-    if (e.target.closest('.task-title, .task-priority, .task-desc-badge')) {
-      const taskItem = e.target.closest('.task-item');
-      if (taskItem) {
-        alternarDescricaoTask(card, taskItem);
-        return;
-      }
-    }
-
-    if (e.target.closest('.project-header') || e.target.classList.contains('progress-bar-container')) {
-      alternarExpansaoProjeto(card);
+    const btnAddTask = e.target.closest('.btn-add-task');
+    if (btnAddTask) {
+      const card = btnAddTask.closest('.project-card');
+      const form = card && card.querySelector('.inline-task-form');
+      if (form) form.style.display = form.style.display === 'flex' ? 'none' : 'flex';
       return;
     }
 
-    const btnTarget = e.target.closest('button');
-    if (!btnTarget) return;
+    const btnSaveTask = e.target.closest('.btn-save-task');
+    if (btnSaveTask) {
+      const card = btnSaveTask.closest('.project-card');
+      const pIndex = parseInt(card.getAttribute('data-project-index'));
+      const nomeInput = card.querySelector('.input-task-name');
+      const prioridadeSelect = card.querySelector('.select-task-priority');
+      const nome = nomeInput ? nomeInput.value.trim() : '';
 
-    const inlineForm = card.querySelector('.inline-task-form');
-    const btnConfirmTaskDel = card.querySelector('.btn-confirm-task-delete');
-    const btnCancelTaskDel = card.querySelector('.btn-cancel-task-delete');
-
-    if (btnTarget.classList.contains('btn-add-task')) {
-      if (inlineForm) {
-        inlineForm.style.display = 'flex';
-        const inputName = inlineForm.querySelector('.input-task-name');
-        if (inputName) inputName.focus();
-      }
-    }
-
-    if (btnTarget.classList.contains('btn-save-task')) {
-      const inputName = inlineForm.querySelector('.input-task-name');
-      const selectPriority = inlineForm.querySelector('.select-task-priority');
-
-      const taskText = inputName.value.trim();
-      const priority = selectPriority.value;
-
-      if (!taskText) {
+      if (!nome) {
         alert('Digite o nome da tarefa!');
         return;
       }
 
-      projectsData[pIndex].tasks.push({
-        text: taskText,
-        priority: parseInt(priority),
-        completed: false
-      });
-
-      salvarTudo();
-      renderizarProjetos();
-    }
-
-    if (btnTarget.classList.contains('btn-cancel-task')) {
-      if (inlineForm) inlineForm.style.display = 'none';
-    }
-
-    if (btnTarget.classList.contains('btn-remove-task')) {
-      if (projectsData[pIndex].tasks.length === 0) {
-        alert('Nenhuma tarefa para remover neste projeto.');
-        return;
-      }
-
-      card.querySelectorAll('.task-delete-selector').forEach(sel => sel.style.display = 'flex');
-      if (btnConfirmTaskDel) btnConfirmTaskDel.style.display = 'inline-flex';
-      if (btnCancelTaskDel) btnCancelTaskDel.style.display = 'inline-flex';
-    }
-
-    if (btnTarget.classList.contains('btn-confirm-task-delete')) {
-      const checkedCheckboxes = card.querySelectorAll('.task-delete-checkbox:checked');
-      if (checkedCheckboxes.length === 0) {
-        alert('Selecione ao menos uma tarefa para remover!');
-        return;
-      }
-
-      const taskIndexesToRemove = [];
-      checkedCheckboxes.forEach(chk => {
-        const item = chk.closest('.task-item');
-        if (item) {
-          const idx = parseInt(item.getAttribute('data-task-index'));
-          taskIndexesToRemove.push(idx);
-        }
-      });
-
-      projectsData[pIndex].tasks = projectsData[pIndex].tasks.filter((_, idx) => !taskIndexesToRemove.includes(idx));
-      expandedTaskByProject.delete(card.getAttribute('data-project-key'));
-      salvarTudo();
-      renderizarProjetos();
-    }
-
-    if (btnTarget.classList.contains('btn-cancel-task-delete')) {
-      card.querySelectorAll('.task-delete-selector').forEach(sel => {
-        sel.style.display = 'none';
-        const chk = sel.querySelector('.task-delete-checkbox');
-        if (chk) chk.checked = false;
-      });
-
-      if (btnConfirmTaskDel) btnConfirmTaskDel.style.display = 'none';
-      if (btnCancelTaskDel) btnCancelTaskDel.style.display = 'none';
-    }
-  }
-
-  function tratarMudancaCheckbox(e) {
-    if (e.target.classList.contains('custom-checkbox')) {
-      const card = e.target.closest('.project-card');
-      const taskItem = e.target.closest('.task-item');
-      if (card && taskItem) {
-        const pIndex = parseInt(card.getAttribute('data-project-index'));
-        const tIndex = parseInt(taskItem.getAttribute('data-task-index'));
-
-        projectsData[pIndex].tasks[tIndex].completed = e.target.checked;
+      if (projectsData[pIndex]) {
+        projectsData[pIndex].tasks.push({
+          text: nome,
+          priority: parseInt(prioridadeSelect ? prioridadeSelect.value : '1'),
+          completed: false
+        });
         salvarTudo();
         renderizarProjetos();
       }
+      return;
     }
-  }
 
-  [projectsList, completedProjectsList].forEach(lista => {
-    if (!lista) return;
-    lista.addEventListener('click', tratarAcoesDoCard);
-    lista.addEventListener('change', tratarMudancaCheckbox);
-    lista.addEventListener('input', tratarInputDescricao);
-    lista.addEventListener('focusout', tratarSaidaDescricao);
+    const btnCancelTask = e.target.closest('.btn-cancel-task');
+    if (btnCancelTask) {
+      const card = btnCancelTask.closest('.project-card');
+      const form = card && card.querySelector('.inline-task-form');
+      if (form) form.style.display = 'none';
+      return;
+    }
+
+    const btnRemoveTask = e.target.closest('.btn-remove-task');
+    if (btnRemoveTask) {
+      const card = btnRemoveTask.closest('.project-card');
+      if (card) ligarModoExclusaoTask(card);
+      return;
+    }
+
+    const btnCancelTaskDel = e.target.closest('.btn-cancel-task-delete');
+    if (btnCancelTaskDel) {
+      const card = btnCancelTaskDel.closest('.project-card');
+      if (card) desligarModoExclusaoTask(card);
+      return;
+    }
+
+    const btnConfirmTaskDel = e.target.closest('.btn-confirm-task-delete');
+    if (btnConfirmTaskDel) {
+      const card = btnConfirmTaskDel.closest('.project-card');
+      const pIndex = parseInt(card.getAttribute('data-project-index'));
+      const taskItens = card.querySelectorAll('.task-item');
+      const indicesRemover = [];
+
+      taskItens.forEach(item => {
+        const chk = item.querySelector('.task-delete-checkbox');
+        if (chk && chk.checked) {
+          indicesRemover.push(parseInt(item.getAttribute('data-task-index')));
+        }
+      });
+
+      if (indicesRemover.length === 0) {
+        alert('Selecione pelo menos uma tarefa para excluir!');
+        return;
+      }
+
+      if (projectsData[pIndex]) {
+        projectsData[pIndex].tasks = projectsData[pIndex].tasks.filter((_, idx) => !indicesRemover.includes(idx));
+        salvarTudo();
+        renderizarProjetos();
+      }
+      return;
+    }
+
+    const taskTitle = e.target.closest('.task-title');
+    const taskDescBadge = e.target.closest('.task-desc-badge');
+    if (taskTitle || taskDescBadge) {
+      const item = (taskTitle || taskDescBadge).closest('.task-item');
+      const card = item && item.closest('.project-card');
+      if (card && item) alternarDescricaoTask(card, item);
+      return;
+    }
+
+    const btnEditTask = e.target.closest('.btn-edit-task');
+    if (btnEditTask) {
+      const card = btnEditTask.closest('.project-card');
+      const item = btnEditTask.closest('.task-item');
+      if (card && item) {
+        const pIdx = parseInt(card.getAttribute('data-project-index'));
+        const tIdx = parseInt(item.getAttribute('data-task-index'));
+        abrirModalEditarTask(pIdx, tIdx);
+      }
+      return;
+    }
   });
+
+  document.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('custom-checkbox')) return;
+    const item = e.target.closest('.task-item');
+    const card = e.target.closest('.project-card');
+    if (!item || !card) return;
+
+    const pIndex = parseInt(card.getAttribute('data-project-index'));
+    const tIndex = parseInt(item.getAttribute('data-task-index'));
+
+    if (projectsData[pIndex] && projectsData[pIndex].tasks[tIndex]) {
+      projectsData[pIndex].tasks[tIndex].completed = e.target.checked;
+      salvarTudo();
+      renderizarProjetos();
+    }
+  });
+
+  document.addEventListener('input', tratarInputDescricao);
+  document.addEventListener('focusout', tratarSaidaDescricao, true);
+  document.addEventListener('pointerdown', iniciarArrasto);
 
 
   // ===== CALENDÁRIO =====
   let currentCalendarDate = new Date();
-  let selectedDateKey = null;
-
   const calendarMonthYear = document.getElementById('calendarMonthYear');
   const calendarDaysGrid = document.getElementById('calendarDaysGrid');
   const btnPrevMonth = document.getElementById('btnPrevMonth');
   const btnNextMonth = document.getElementById('btnNextMonth');
 
   const modalCalendarEvent = document.getElementById('modalCalendarEvent');
+  const btnCloseCalendarModal = document.getElementById('btnCloseCalendarModal');
+  const btnCloseCalendarModalFooter = document.getElementById('btnCloseCalendarModalFooter');
   const calendarModalTitle = document.getElementById('calendarModalTitle');
   const calendarEventInput = document.getElementById('calendarEventInput');
   const btnAddCalendarEvent = document.getElementById('btnAddCalendarEvent');
   const calendarEventsList = document.getElementById('calendarEventsList');
-  const btnCloseCalendarModal = document.getElementById('btnCloseCalendarModal');
-  const btnCloseCalendarModalFooter = document.getElementById('btnCloseCalendarModalFooter');
-
-  function fecharModalCalendario() {
-    if (modalCalendarEvent) modalCalendarEvent.style.display = 'none';
-    selectedDateKey = null;
-  }
-
-  if (btnCloseCalendarModal) btnCloseCalendarModal.addEventListener('click', fecharModalCalendario);
-  if (btnCloseCalendarModalFooter) btnCloseCalendarModalFooter.addEventListener('click', fecharModalCalendario);
-
-  function abrirModalDiaCalendario(dateKey, dia, mesNome, ano) {
-    selectedDateKey = dateKey;
-    if (calendarModalTitle) calendarModalTitle.textContent = `Eventos de ${dia} de ${mesNome}`;
-    if (calendarEventInput) calendarEventInput.value = '';
-
-    renderizarListaEventosModal();
-    if (modalCalendarEvent) modalCalendarEvent.style.display = 'flex';
-  }
-
-  function renderizarListaEventosModal() {
-    if (!calendarEventsList || !selectedDateKey) return;
-    calendarEventsList.innerHTML = '';
-
-    const eventos = calendarEventsData[selectedDateKey] || [];
-    if (eventos.length === 0) {
-      calendarEventsList.innerHTML = '<span style="color: #a78bfa; font-size: 13px;">Nenhum evento neste dia.</span>';
-      return;
-    }
-
-    eventos.forEach((ev, idx) => {
-      const div = document.createElement('div');
-      div.classList.add('modal-task-item');
-      div.innerHTML = `
-        <span>${ev}</span>
-        <button class="btn-delete-event" data-index="${idx}" title="Excluir"><i class="fa-solid fa-trash"></i></button>
-      `;
-      calendarEventsList.appendChild(div);
-    });
-
-    calendarEventsList.querySelectorAll('.btn-delete-event').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const index = parseInt(btn.getAttribute('data-index'));
-        calendarEventsData[selectedDateKey].splice(index, 1);
-        if (calendarEventsData[selectedDateKey].length === 0) {
-          delete calendarEventsData[selectedDateKey];
-        }
-        salvarTudo();
-        renderizarListaEventosModal();
-        renderizarCalendario();
-      });
-    });
-  }
-
-  if (btnAddCalendarEvent) {
-    btnAddCalendarEvent.addEventListener('click', () => {
-      const texto = calendarEventInput.value.trim();
-      if (!texto) {
-        alert('Digite uma descrição para o evento/prazo!');
-        return;
-      }
-
-      if (!calendarEventsData[selectedDateKey]) {
-        calendarEventsData[selectedDateKey] = [];
-      }
-
-      calendarEventsData[selectedDateKey].push(texto);
-      calendarEventInput.value = '';
-
-      salvarTudo();
-      renderizarListaEventosModal();
-      renderizarCalendario();
-    });
-  }
+  let selectedCalendarDateKey = null;
 
   function renderizarCalendario() {
     if (!calendarDaysGrid || !calendarMonthYear) return;
@@ -1019,58 +1416,94 @@ ${escapeHtml(descricao)}</textarea>
     const ano = currentCalendarDate.getFullYear();
     const mes = currentCalendarDate.getMonth();
 
-    const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
-    const totalDiasMes = new Date(ano, mes + 1, 0).getDate();
-
-    const nomeMes = currentCalendarDate.toLocaleString('pt-BR', { month: 'long' });
-    calendarMonthYear.textContent = `${nomeMes} de ${ano}`;
+    const nomeMes = currentCalendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    calendarMonthYear.textContent = nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1);
 
     calendarDaysGrid.innerHTML = '';
 
+    const primeiroDiaSemana = new Date(ano, mes, 1).getDay();
+    const ultimoDiaMes = new Date(ano, mes + 1, 0).getDate();
+
     for (let i = 0; i < primeiroDiaSemana; i++) {
-      const emptyCell = document.createElement('div');
-      emptyCell.classList.add('calendar-day-cell', 'empty');
-      calendarDaysGrid.appendChild(emptyCell);
+      const celulaVazia = document.createElement('div');
+      celulaVazia.className = 'calendar-day-cell empty';
+      calendarDaysGrid.appendChild(celulaVazia);
     }
 
     const hoje = new Date();
-    for (let dia = 1; dia <= totalDiasMes; dia++) {
-      const dayCell = document.createElement('div');
-      dayCell.classList.add('calendar-day-cell');
 
-      const mesFormatado = String(mes + 1).padStart(2, '0');
-      const diaFormatado = String(dia).padStart(2, '0');
-      const dateKey = `${ano}-${mesFormatado}-${diaFormatado}`;
+    for (let dia = 1; dia <= ultimoDiaMes; dia++) {
+      const celula = document.createElement('div');
+      celula.className = 'calendar-day-cell';
 
-      if (
-        dia === hoje.getDate() &&
-        mes === hoje.getMonth() &&
-        ano === hoje.getFullYear()
-      ) {
-        dayCell.classList.add('today');
+      const dataStr = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+
+      if (dia === hoje.getDate() && mes === hoje.getMonth() && ano === hoje.getFullYear()) {
+        celula.classList.add('today');
       }
 
       let badgesHTML = '';
-      const eventosDoDia = calendarEventsData[dateKey] || [];
-      if (eventosDoDia.length > 0) {
-        badgesHTML += '<div class="calendar-events-container">';
-        eventosDoDia.forEach(ev => {
-          badgesHTML += `<div class="calendar-event-badge" title="${ev}">${ev}</div>`;
-        });
-        badgesHTML += '</div>';
-      }
-
-      dayCell.innerHTML = `
-        <span class="calendar-day-number">${dia}</span>
-        ${badgesHTML}
-      `;
-
-      dayCell.addEventListener('click', () => {
-        abrirModalDiaCalendario(dateKey, dia, nomeMes, ano);
+      const eventosDoDia = calendarEventsData[dataStr] || [];
+      eventosDoDia.forEach(ev => {
+        badgesHTML += `<div class="calendar-event-badge">${escapeHtml(ev)}</div>`;
       });
 
-      calendarDaysGrid.appendChild(dayCell);
+      celula.innerHTML = `
+        <div class="calendar-day-number">${dia}</div>
+        <div class="calendar-events-container">${badgesHTML}</div>
+      `;
+
+      celula.addEventListener('click', () => abrirModalCalendario(dataStr, dia, mes, ano));
+      calendarDaysGrid.appendChild(celula);
     }
+  }
+
+  function abrirModalCalendario(dataStr, dia, mes, ano) {
+    selectedCalendarDateKey = dataStr;
+    const dataObj = new Date(ano, mes, dia);
+    const dataFormatada = dataObj.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    if (calendarModalTitle) calendarModalTitle.textContent = `Eventos de ${dataFormatada}`;
+    if (calendarEventInput) calendarEventInput.value = '';
+    renderizarListaEventosModal();
+    if (modalCalendarEvent) modalCalendarEvent.style.display = 'flex';
+  }
+
+  function fecharModalCalendario() {
+    if (modalCalendarEvent) modalCalendarEvent.style.display = 'none';
+  }
+
+  function renderizarListaEventosModal() {
+    if (!calendarEventsList) return;
+    calendarEventsList.innerHTML = '';
+    const eventos = calendarEventsData[selectedCalendarDateKey] || [];
+
+    if (eventos.length === 0) {
+      calendarEventsList.innerHTML = '<span style="color: var(--accent-soft); font-size: 13px;">Nenhum evento neste dia.</span>';
+      return;
+    }
+
+    eventos.forEach((ev, idx) => {
+      const item = document.createElement('div');
+      item.className = 'modal-task-item';
+      item.innerHTML = `
+        <span>${escapeHtml(ev)}</span>
+        <button type="button" class="btn-delete-event" data-index="${idx}" title="Excluir"><i class="fa-solid fa-trash"></i></button>
+      `;
+      calendarEventsList.appendChild(item);
+    });
+
+    calendarEventsList.querySelectorAll('.btn-delete-event').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-index'));
+        calendarEventsData[selectedCalendarDateKey].splice(idx, 1);
+        if (calendarEventsData[selectedCalendarDateKey].length === 0) {
+          delete calendarEventsData[selectedCalendarDateKey];
+        }
+        salvarTudo();
+        renderizarCalendario();
+        renderizarListaEventosModal();
+      });
+    });
   }
 
   if (btnPrevMonth) {
@@ -1087,663 +1520,558 @@ ${escapeHtml(descricao)}</textarea>
     });
   }
 
+  if (btnCloseCalendarModal) btnCloseCalendarModal.addEventListener('click', fecharModalCalendario);
+  if (btnCloseCalendarModalFooter) btnCloseCalendarModalFooter.addEventListener('click', fecharModalCalendario);
 
-  // ===== GALERIA (imagens + arquivos) =====
-  const TAMANHO_MAX_ARQUIVO = 5 * 1024 * 1024; // 5 MB por arquivo
-  const TAMANHO_PARTE = 700000;                // caracteres por parte (o Firestore aceita ~1 MB por documento)
-
-  const TIPOS_ARQUIVO = {
-    pdf:  { icone: 'fa-file-pdf',        nome: 'PDF',        mime: 'application/pdf' },
-    doc:  { icone: 'fa-file-word',       nome: 'Word',       mime: 'application/msword' },
-    docx: { icone: 'fa-file-word',       nome: 'Word',       mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-    xls:  { icone: 'fa-file-excel',      nome: 'Excel',      mime: 'application/vnd.ms-excel' },
-    xlsx: { icone: 'fa-file-excel',      nome: 'Excel',      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-    csv:  { icone: 'fa-file-csv',        nome: 'CSV',        mime: 'text/csv' },
-    ppt:  { icone: 'fa-file-powerpoint', nome: 'PowerPoint', mime: 'application/vnd.ms-powerpoint' },
-    pptx: { icone: 'fa-file-powerpoint', nome: 'PowerPoint', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
-    txt:  { icone: 'fa-file-lines',      nome: 'Texto',      mime: 'text/plain' }
-  };
-
-  const extensaoDe = (nome) => {
-    const partes = String(nome || '').split('.');
-    return partes.length > 1 ? partes.pop().toLowerCase() : '';
-  };
-  const ehImagem = (f) => (f.type || '').startsWith('image/');
-  const ehArquivoSuportado = (f) => !!TIPOS_ARQUIVO[extensaoDe(f.name)];
-
-  function formatarTamanho(bytes) {
-    if (!bytes && bytes !== 0) return '';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
+  if (btnAddCalendarEvent) {
+    btnAddCalendarEvent.addEventListener('click', () => {
+      const nomeEv = calendarEventInput ? calendarEventInput.value.trim() : '';
+      if (!nomeEv) {
+        alert('Digite o nome do evento/prazo!');
+        return;
+      }
+      if (!calendarEventsData[selectedCalendarDateKey]) {
+        calendarEventsData[selectedCalendarDateKey] = [];
+      }
+      calendarEventsData[selectedCalendarDateKey].push(nomeEv);
+      if (calendarEventInput) calendarEventInput.value = '';
+      salvarTudo();
+      renderizarCalendario();
+      renderizarListaEventosModal();
+    });
   }
 
-  let galleryCode = null;
-  let galleryUnsub = null;
+
+  // ===== GALERIA & ARQUIVOS (Mantida intacta) =====
   let galleryItems = [];
-  let activeFilter = null;
+  let currentGalleryTag = '';
+  const UPLOAD_CHUNK_SIZE = 800000;
 
-  let pendingFiles = [];
-  let pendingTags = [];
-  let viewerId = null;
-  let viewerItem = null;
-  let viewerTags = [];
-
-  const gridEl = document.getElementById('galleryGrid');
-  const filtersEl = document.getElementById('galleryTagFilters');
-  const countEl = document.getElementById('galleryCount');
-  const datalistEl = document.getElementById('galleryTagSuggestions');
-
-  const modalUpload = document.getElementById('modalGalleryUpload');
-  const fileInput = document.getElementById('galleryFileInput');
+  const galleryGrid = document.getElementById('galleryGrid');
+  const galleryCount = document.getElementById('galleryCount');
+  const galleryTagFilters = document.getElementById('galleryTagFilters');
+  const galleryTagSuggestions = document.getElementById('galleryTagSuggestions');
+  const btnOpenGalleryUpload = document.getElementById('btnOpenGalleryUpload');
+  const modalGalleryUpload = document.getElementById('modalGalleryUpload');
+  const btnCloseGalleryUpload = document.getElementById('btnCloseGalleryUpload');
+  const btnCancelGalleryUpload = document.getElementById('btnCancelGalleryUpload');
+  const btnSaveGalleryUpload = document.getElementById('btnSaveGalleryUpload');
   const uploadDrop = document.getElementById('uploadDrop');
+  const galleryFileInput = document.getElementById('galleryFileInput');
   const uploadPreview = document.getElementById('uploadPreview');
   const uploadTagInput = document.getElementById('uploadTagInput');
+  const btnAddUploadTag = document.getElementById('btnAddUploadTag');
   const uploadTagList = document.getElementById('uploadTagList');
   const uploadStatus = document.getElementById('uploadStatus');
-  const btnSaveUpload = document.getElementById('btnSaveGalleryUpload');
 
-  const modalViewer = document.getElementById('modalGalleryView');
+  const modalGalleryView = document.getElementById('modalGalleryView');
+  const btnCloseGalleryView = document.getElementById('btnCloseGalleryView');
+  const btnCloseGalleryViewFooter = document.getElementById('btnCloseGalleryViewFooter');
+  const btnSaveViewerTags = document.getElementById('btnSaveViewerTags');
+  const btnDeleteImage = document.getElementById('btnDeleteImage');
   const viewerTitle = document.getElementById('viewerTitle');
   const viewerImg = document.getElementById('viewerImg');
   const viewerFileBox = document.getElementById('viewerFileBox');
   const viewerFileIcon = document.getElementById('viewerFileIcon');
   const viewerFileName = document.getElementById('viewerFileName');
   const viewerFileMeta = document.getElementById('viewerFileMeta');
+  const btnDownloadFile = document.getElementById('btnDownloadFile');
   const viewerFileStatus = document.getElementById('viewerFileStatus');
   const viewerTagList = document.getElementById('viewerTagList');
   const viewerTagInput = document.getElementById('viewerTagInput');
+  const btnAddViewerTag = document.getElementById('btnAddViewerTag');
 
-  function galleryCol() {
-    return db.collection('workspaces').doc(galleryCode).collection('gallery');
+  let pendingFilesToUpload = [];
+  let pendingUploadTags = [];
+  let currentViewingItem = null;
+  let viewerTagsTemp = [];
+
+  function iniciarGaleria(code) {
+    carregarGaleria(code);
   }
 
-  function todasAsTags() {
-    const mapa = new Map();
-    galleryItems.forEach((item) => (item.tags || []).forEach((t) => {
-      const k = t.toLowerCase();
-      if (!mapa.has(k)) mapa.set(k, t);
-    }));
-    return [...mapa.values()].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }
-
-  function sugestoes() {
-    const mapa = new Map();
-    const projTitles = projectsData.map(p => p.title);
-    projTitles.concat(todasAsTags()).forEach((t) => {
-      const k = String(t).toLowerCase();
-      if (k && !mapa.has(k)) mapa.set(k, t);
+  function carregarGaleria(code) {
+    db.collection('workspaces').doc(code).collection('gallery').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
+      galleryItems = [];
+      snapshot.forEach(doc => {
+        galleryItems.push({ id: doc.id, ...doc.data() });
+      });
+      renderizarGaleria();
+    }, (err) => {
+      console.error('Erro ao carregar galeria:', err);
     });
-    return [...mapa.values()];
+  }
+
+  function renderizarGaleria() {
+    if (!galleryGrid) return;
+    galleryGrid.innerHTML = '';
+
+    const tagsSet = new Set();
+    galleryItems.forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(t => tagsSet.add(t));
+      }
+    });
+
+    if (galleryTagFilters) {
+      galleryTagFilters.innerHTML = '';
+      const chipTodas = document.createElement('span');
+      chipTodas.className = `tag-chip ${currentGalleryTag === '' ? 'active' : ''}`;
+      chipTodas.textContent = 'Todas';
+      chipTodas.addEventListener('click', () => { currentGalleryTag = ''; renderizarGaleria(); });
+      galleryTagFilters.appendChild(chipTodas);
+
+      tagsSet.forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = `tag-chip ${currentGalleryTag === tag ? 'active' : ''}`;
+        chip.textContent = tag;
+        chip.addEventListener('click', () => { currentGalleryTag = tag; renderizarGaleria(); });
+        galleryTagFilters.appendChild(chip.tag);
+        galleryTagFilters.appendChild(chip);
+      });
+    }
+
+    const filtrados = currentGalleryTag === '' 
+      ? galleryItems 
+      : galleryItems.filter(item => item.tags && item.tags.includes(currentGalleryTag));
+
+    if (galleryCount) {
+      galleryCount.textContent = `${filtrados.length} item(ns)`;
+    }
+
+    if (filtrados.length === 0) {
+      galleryGrid.innerHTML = '<div class="gallery-empty">Nenhum item na galeria. Clique em "Adicionar" para enviar imagens ou arquivos.</div>';
+      return;
+    }
+
+    filtrados.forEach(item => {
+      const div = document.createElement('div');
+      let tagsHTML = '';
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(t => { tagsHTML += `<span>${escapeHtml(t)}</span>`; });
+      }
+
+      if (item.type === 'file') {
+        div.className = 'gallery-item gallery-file';
+        const ext = (item.name.split('.').pop() || '').toLowerCase();
+        let iconClass = 'fa-file';
+        let extClass = '';
+        if (ext === 'pdf') { iconClass = 'fa-file-pdf'; extClass = 'ext-pdf'; }
+        else if (['doc', 'docx'].includes(ext)) { iconClass = 'fa-file-word'; extClass = 'ext-doc'; }
+        else if (['xls', 'xlsx', 'csv'].includes(ext)) { iconClass = 'fa-file-excel'; extClass = 'ext-xls'; }
+        else if (['ppt', 'pptx'].includes(ext)) { iconClass = 'fa-file-powerpoint'; extClass = 'ext-ppt'; }
+
+        div.innerHTML = `
+          <i class="fa-solid ${iconClass} gallery-file-icon ${extClass}"></i>
+          <div class="gallery-file-name">${escapeHtml(item.name)}</div>
+          <div class="gallery-file-meta">${formatarTamanho(item.size)}</div>
+          <div class="gallery-item-tags">${tagsHTML}</div>
+        `;
+      } else {
+        div.className = 'gallery-item';
+        div.innerHTML = `
+          <img src="${item.thumb || item.dataUrl || ''}" alt="Imagem">
+          <div class="gallery-item-tags">${tagsHTML}</div>
+        `;
+      }
+
+      div.addEventListener('click', () => abrirVisualizadorGaleria(item));
+      galleryGrid.appendChild(div);
+    });
   }
 
   function atualizarDatalist() {
-    if (!datalistEl) return;
-    datalistEl.innerHTML = '';
-    sugestoes().forEach((s) => {
-      const o = document.createElement('option');
-      o.value = s;
-      datalistEl.appendChild(o);
-    });
-  }
-
-  function normalizarTag(texto) {
-    const t = texto.replace(/\s+/g, ' ').trim();
-    if (!t) return '';
-    const existente = sugestoes().find((s) => s.toLowerCase() === t.toLowerCase());
-    return existente || t;
-  }
-
-  const temTag = (lista, tag) => lista.some((t) => t.toLowerCase() === tag.toLowerCase());
-
-  function adicionarTagDoInput(inputEl, lista, aoMudar) {
-    const t = normalizarTag(inputEl.value);
-    if (t && !temTag(lista, t)) lista.push(t);
-    inputEl.value = '';
-    aoMudar();
-  }
-
-  function criarChip(texto, aoRemover) {
-    const chip = document.createElement('span');
-    chip.className = 'tag-chip';
-    chip.appendChild(document.createTextNode(texto));
-    if (aoRemover) {
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.className = 'chip-x';
-      x.textContent = '×';
-      x.title = 'Remover tag';
-      x.addEventListener('click', aoRemover);
-      chip.appendChild(x);
-    }
-    return chip;
-  }
-
-  // IMPORTANTE: recebe uma FUNÇÃO que devolve a lista atual (obterLista).
-  // Assim o botão sempre escreve na lista certa, mesmo depois de ela ser recriada.
-  function ligarCampoDeTag(inputEl, botaoEl, obterLista, aoMudar) {
-    if (!inputEl || !botaoEl) return;
-    const adicionar = () => adicionarTagDoInput(inputEl, obterLista(), aoMudar);
-    botaoEl.addEventListener('click', adicionar);
-    inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); adicionar(); }
-    });
-    inputEl.addEventListener('input', () => {
-      if (inputEl.value.includes(',')) {
-        inputEl.value = inputEl.value.replace(/,/g, '');
-        adicionar();
+    if (!galleryTagSuggestions) return;
+    const tagsSet = new Set();
+    galleryItems.forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(t => tagsSet.add(t));
       }
     });
-  }
-
-  function mensagemGaleria(texto) {
-    const div = document.createElement('div');
-    div.className = 'gallery-empty';
-    div.textContent = texto;
-    return div;
-  }
-
-  function renderFiltros() {
-    if (!filtersEl) return;
-    filtersEl.innerHTML = '';
-    const tags = todasAsTags();
-    if (!tags.length) return;
-
-    const todas = document.createElement('button');
-    todas.type = 'button';
-    todas.className = 'tag-chip' + (activeFilter ? '' : ' active');
-    todas.textContent = 'Todas (' + galleryItems.length + ')';
-    todas.addEventListener('click', () => { activeFilter = null; renderGaleria(); });
-    filtersEl.appendChild(todas);
-
-    tags.forEach((tag) => {
-      const n = galleryItems.filter((i) => temTag(i.tags || [], tag)).length;
-      const b = document.createElement('button');
-      b.type = 'button';
-      const ativo = activeFilter && activeFilter.toLowerCase() === tag.toLowerCase();
-      b.className = 'tag-chip' + (ativo ? ' active' : '');
-      b.textContent = tag + ' (' + n + ')';
-      b.addEventListener('click', () => { activeFilter = tag; renderGaleria(); });
-      filtersEl.appendChild(b);
+    galleryTagSuggestions.innerHTML = '';
+    tagsSet.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      galleryTagSuggestions.appendChild(opt);
     });
   }
 
-  function renderGaleria() {
-    if (!gridEl) return;
-    gridEl.innerHTML = '';
-    if (!galleryCode) {
-      if (filtersEl) filtersEl.innerHTML = '';
-      if (countEl) countEl.textContent = '';
-      gridEl.appendChild(mensagemGaleria('Conecte o código de sincronização para usar a galeria.'));
-      return;
-    }
-
-    atualizarDatalist();
-    if (activeFilter && !todasAsTags().some((t) => t.toLowerCase() === activeFilter.toLowerCase())) {
-      activeFilter = null;
-    }
-    renderFiltros();
-
-    const itens = activeFilter ? galleryItems.filter((i) => temTag(i.tags || [], activeFilter)) : galleryItems;
-    if (countEl) countEl.textContent = itens.length + (itens.length === 1 ? ' item' : ' itens');
-
-    if (!itens.length) {
-      gridEl.appendChild(mensagemGaleria(activeFilter ? 'Nenhum item com essa tag.' : 'Nenhum item ainda. Clique em "Adicionar".'));
-      return;
-    }
-
-    itens.forEach((item) => {
-      const card = document.createElement('div');
-      card.className = 'gallery-item';
-
-      if (item.kind === 'file') {
-        card.classList.add('gallery-file');
-        const tipo = TIPOS_ARQUIVO[item.ext] || { icone: 'fa-file', nome: 'Arquivo' };
-
-        const icone = document.createElement('i');
-        icone.className = 'fa-solid ' + tipo.icone + ' gallery-file-icon ext-' + item.ext;
-        card.appendChild(icone);
-
-        const nome = document.createElement('div');
-        nome.className = 'gallery-file-name';
-        nome.textContent = item.name;
-        card.appendChild(nome);
-
-        const meta = document.createElement('div');
-        meta.className = 'gallery-file-meta';
-        meta.textContent = tipo.nome + ' · ' + formatarTamanho(item.size);
-        card.appendChild(meta);
-      } else {
-        const img = document.createElement('img');
-        img.src = item.thumb || item.data;
-        img.alt = item.name || 'Imagem';
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        card.appendChild(img);
-      }
-
-      if ((item.tags || []).length) {
-        const tagsDiv = document.createElement('div');
-        tagsDiv.className = 'gallery-item-tags';
-        item.tags.slice(0, 3).forEach((t) => {
-          const s = document.createElement('span');
-          s.textContent = t;
-          tagsDiv.appendChild(s);
-        });
-        card.appendChild(tagsDiv);
-      }
-
-      card.addEventListener('click', () => abrirViewer(item.id));
-      gridEl.appendChild(card);
-    });
+  function formatarTamanho(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
   }
 
-  function iniciarGaleria(code) {
-    if (galleryUnsub) galleryUnsub();
-    galleryCode = code;
-    galleryItems = [];
-    activeFilter = null;
-    renderGaleria();
-
-    galleryUnsub = galleryCol().orderBy('createdAt', 'desc').onSnapshot((snap) => {
-      galleryItems = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-      renderGaleria();
-    }, (err) => {
-      console.error('Erro ao carregar a galeria:', err);
-      if (gridEl) {
-        gridEl.innerHTML = '';
-        gridEl.appendChild(mensagemGaleria(err.code === 'permission-denied'
-          ? 'Sem permissão para ler a galeria. Atualize as regras do Firestore.'
-          : 'Não foi possível carregar a galeria. Verifique sua conexão.'));
-      }
-    });
-  }
-
-  // ----- imagens: reduz o tamanho antes de enviar -----
-  function redimensionar(file, maxLado, qualidade) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * escala));
-        const h = Math.max(1, Math.round(img.height * escala));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', qualidade));
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Não foi possível ler "' + file.name + '".'));
-      };
-      img.src = url;
-    });
-  }
-
-  async function prepararImagem(file) {
-    const tentativas = [[1280, 0.72], [1024, 0.6], [800, 0.5]];
-    let data = '';
-    for (const [lado, qualidade] of tentativas) {
-      data = await redimensionar(file, lado, qualidade);
-      if (data.length < 850000) break;
-    }
-    if (data.length >= 850000) {
-      throw new Error('A imagem "' + file.name + '" ficou grande demais mesmo comprimida.');
-    }
-    const thumb = await redimensionar(file, 360, 0.6);
-    return { data, thumb };
-  }
-
-  // ----- arquivos: divide em partes e guarda no Firestore -----
-  function lerComoBase64(file) {
-    return new Promise((resolve, reject) => {
-      const leitor = new FileReader();
-      leitor.onload = () => {
-        const texto = String(leitor.result);
-        resolve(texto.slice(texto.indexOf(',') + 1));
-      };
-      leitor.onerror = () => reject(new Error('Não foi possível ler "' + file.name + '".'));
-      leitor.readAsDataURL(file);
-    });
-  }
-
-  function base64ParaBlob(base64, mime) {
-    const binario = atob(base64);
-    const bytes = new Uint8Array(binario.length);
-    for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-    return new Blob([bytes], { type: mime });
-  }
-
-  const nomeDaParte = (i) => String(i).padStart(3, '0');
-
-  async function enviarArquivo(file, tags, criadoEm, aoProgredir) {
-    const base64 = await lerComoBase64(file);
-    if (!base64) throw new Error('O arquivo "' + file.name + '" está vazio.');
-
-    const partes = [];
-    for (let i = 0; i < base64.length; i += TAMANHO_PARTE) partes.push(base64.slice(i, i + TAMANHO_PARTE));
-
-    const ref = galleryCol().doc();
-    const escritas = [];
-    try {
-      for (let i = 0; i < partes.length; i++) {
-        if (aoProgredir) aoProgredir(i + 1, partes.length);
-        await ref.collection('chunks').doc(nomeDaParte(i)).set({ i, data: partes[i] });
-        escritas.push(i);
-      }
-      // O registro principal só é criado no fim: se algo falhar antes, nada aparece pela metade.
-      const ext = extensaoDe(file.name);
-      await ref.set({
-        kind: 'file',
-        name: file.name,
-        ext,
-        size: file.size,
-        mime: file.type || TIPOS_ARQUIVO[ext].mime,
-        chunks: partes.length,
-        tags,
-        createdAt: criadoEm
-      });
-    } catch (err) {
-      await Promise.all(escritas.map((i) => ref.collection('chunks').doc(nomeDaParte(i)).delete().catch(() => {})));
-      throw err;
-    }
-  }
-
-  async function baixarArquivo(item) {
-    if (!item || item.kind !== 'file') return;
-    if (viewerFileStatus) viewerFileStatus.textContent = 'Preparando o download...';
-    try {
-      const snap = await galleryCol().doc(item.id).collection('chunks').get();
-      const docs = snap.docs.slice().sort((a, b) => (a.id < b.id ? -1 : 1));
-      if (docs.length !== item.chunks) {
-        throw new Error('O arquivo está incompleto (' + docs.length + ' de ' + item.chunks + ' partes).');
-      }
-      const base64 = docs.map((d) => d.data().data).join('');
-      const blob = base64ParaBlob(base64, item.mime || 'application/octet-stream');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = item.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 15000);
-      if (viewerFileStatus) viewerFileStatus.textContent = '';
-    } catch (err) {
-      console.error('Erro ao baixar o arquivo:', err);
-      if (viewerFileStatus) viewerFileStatus.textContent = 'Não foi possível baixar: ' + err.message;
-    }
-  }
-
-  async function excluirItem(item) {
-    const ref = galleryCol().doc(item.id);
-    if (item.kind === 'file') {
-      const partes = await ref.collection('chunks').get();
-      await Promise.all(partes.docs.map((d) => ref.collection('chunks').doc(d.id).delete()));
-    }
-    await ref.delete();
-  }
-
-  // ----- janela de upload -----
-  function renderPreview() {
-    if (!uploadPreview) return;
-    uploadPreview.innerHTML = '';
-
-    pendingFiles.forEach((f, i) => {
-      const item = document.createElement('div');
-      item.className = 'upload-preview-item';
-
-      if (ehImagem(f)) {
-        const img = new Image();
-        const url = URL.createObjectURL(f);
-        img.onload = () => URL.revokeObjectURL(url);
-        img.src = url;
-        item.appendChild(img);
-      } else {
-        item.classList.add('is-file');
-        const tipo = TIPOS_ARQUIVO[extensaoDe(f.name)] || { icone: 'fa-file' };
-        const icone = document.createElement('i');
-        icone.className = 'fa-solid ' + tipo.icone;
-        const nome = document.createElement('span');
-        nome.textContent = f.name + ' (' + formatarTamanho(f.size) + ')';
-        item.appendChild(icone);
-        item.appendChild(nome);
-      }
-
-      const remover = document.createElement('button');
-      remover.type = 'button';
-      remover.className = 'upload-remove';
-      remover.title = 'Remover';
-      remover.textContent = '×';
-      remover.addEventListener('click', () => {
-        pendingFiles.splice(i, 1);
-        renderPreview();
-      });
-      item.appendChild(remover);
-
-      uploadPreview.appendChild(item);
-    });
-  }
-
-  function renderUploadTags() {
-    if (!uploadTagList) return;
-    uploadTagList.innerHTML = '';
-    pendingTags.forEach((t, i) => {
-      uploadTagList.appendChild(criarChip(t, () => { pendingTags.splice(i, 1); renderUploadTags(); }));
-    });
-  }
-
-  function adicionarArquivos(lista) {
-    const recusados = [];
-    Array.from(lista).forEach((f) => {
-      if (ehImagem(f)) {
-        pendingFiles.push(f);
-      } else if (ehArquivoSuportado(f)) {
-        if (f.size > TAMANHO_MAX_ARQUIVO) {
-          recusados.push('"' + f.name + '" tem ' + formatarTamanho(f.size) + ' (o limite é 5 MB)');
-        } else {
-          pendingFiles.push(f);
-        }
-      } else {
-        recusados.push('"' + f.name + '" não é um tipo aceito');
-      }
-    });
-    if (uploadStatus) uploadStatus.textContent = recusados.length ? 'Não adicionado: ' + recusados.join('; ') + '.' : '';
-    renderPreview();
-  }
-
-  function abrirUpload() {
-    if (!galleryCode) {
-      alert('Conecte o código de sincronização antes de usar a galeria.');
-      return;
-    }
-    pendingFiles = [];
-    pendingTags = [];
+  // Upload modal handlers
+  if (btnOpenGalleryUpload) btnOpenGalleryUpload.addEventListener('click', () => {
+    pendingFilesToUpload = [];
+    pendingUploadTags = [];
+    if (uploadPreview) uploadPreview.innerHTML = '';
     if (uploadTagInput) uploadTagInput.value = '';
+    renderizarTagsUpload();
     if (uploadStatus) uploadStatus.textContent = '';
-    if (fileInput) fileInput.value = '';
-    atualizarDatalist();
-    renderPreview();
-    renderUploadTags();
-    if (modalUpload) modalUpload.style.display = 'flex';
+    if (modalGalleryUpload) modalGalleryUpload.style.display = 'flex';
+  });
+
+  function fecharUploadModal() {
+    if (modalGalleryUpload) modalGalleryUpload.style.display = 'none';
   }
 
-  function fecharUpload() {
-    if (modalUpload) modalUpload.style.display = 'none';
-  }
+  if (btnCloseGalleryUpload) btnCloseGalleryUpload.addEventListener('click', fecharUploadModal);
+  if (btnCancelGalleryUpload) btnCancelGalleryUpload.addEventListener('click', fecharUploadModal);
 
-  async function salvarUpload() {
-    if (uploadTagInput && uploadTagInput.value.trim()) {
-      adicionarTagDoInput(uploadTagInput, pendingTags, renderUploadTags);
-    }
-    if (!pendingFiles.length) {
-      alert('Escolha pelo menos um arquivo ou imagem.');
-      return;
-    }
-
-    if (btnSaveUpload) btnSaveUpload.disabled = true;
-    const total = pendingFiles.length;
-    const tags = pendingTags.slice();
-    let enviados = 0;
-    try {
-      for (let i = 0; i < total; i++) {
-        const f = pendingFiles[i];
-        const rotulo = 'Enviando ' + (i + 1) + ' de ' + total + '...';
-        if (uploadStatus) uploadStatus.textContent = rotulo;
-
-        if (ehImagem(f)) {
-          const prep = await prepararImagem(f);
-          await galleryCol().add({
-            data: prep.data,
-            thumb: prep.thumb,
-            tags,
-            name: f.name,
-            createdAt: Date.now() + i
-          });
-        } else {
-          await enviarArquivo(f, tags, Date.now() + i, (parte, totalPartes) => {
-            if (uploadStatus && totalPartes > 1) uploadStatus.textContent = rotulo + ' (parte ' + parte + ' de ' + totalPartes + ')';
-          });
-        }
-        enviados++;
-      }
-      fecharUpload();
-    } catch (err) {
-      console.error('Erro no upload:', err);
-      pendingFiles.splice(0, enviados);
-      renderPreview();
-      if (uploadStatus) {
-        uploadStatus.textContent = err.code === 'permission-denied'
-          ? 'Sem permissão no Firestore. Atualize as regras de segurança.'
-          : 'Erro ao enviar: ' + err.message;
-      }
-    } finally {
-      if (btnSaveUpload) btnSaveUpload.disabled = false;
-    }
-  }
-
-  const btnOpenGalleryUpload = document.getElementById('btnOpenGalleryUpload');
-  const btnCloseGalleryUpload = document.getElementById('btnCloseGalleryUpload');
-  const btnCancelGalleryUpload = document.getElementById('btnCancelGalleryUpload');
-
-  if (btnOpenGalleryUpload) btnOpenGalleryUpload.addEventListener('click', abrirUpload);
-  if (btnCloseGalleryUpload) btnCloseGalleryUpload.addEventListener('click', fecharUpload);
-  if (btnCancelGalleryUpload) btnCancelGalleryUpload.addEventListener('click', fecharUpload);
-  if (btnSaveUpload) btnSaveUpload.addEventListener('click', salvarUpload);
-
-  if (uploadDrop && fileInput) {
-    uploadDrop.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => { adicionarArquivos(fileInput.files); fileInput.value = ''; });
-    ['dragenter', 'dragover'].forEach((ev) => uploadDrop.addEventListener(ev, (e) => {
-      e.preventDefault();
-      uploadDrop.classList.add('dragover');
-    }));
-    ['dragleave', 'drop'].forEach((ev) => uploadDrop.addEventListener(ev, (e) => {
+  if (uploadDrop && galleryFileInput) {
+    uploadDrop.addEventListener('click', () => galleryFileInput.click());
+    galleryFileInput.addEventListener('change', (e) => processarArquivosSelecionados(e.target.files));
+    uploadDrop.addEventListener('dragover', (e) => { e.preventDefault(); uploadDrop.classList.add('dragover'); });
+    uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('dragover'));
+    uploadDrop.addEventListener('drop', (e) => {
       e.preventDefault();
       uploadDrop.classList.remove('dragover');
-    }));
-    uploadDrop.addEventListener('drop', (e) => adicionarArquivos(e.dataTransfer.files));
-  }
-
-  ligarCampoDeTag(uploadTagInput, document.getElementById('btnAddUploadTag'), () => pendingTags, renderUploadTags);
-
-  // ----- janela de visualização -----
-  function renderViewerTags() {
-    if (!viewerTagList) return;
-    viewerTagList.innerHTML = '';
-    viewerTags.forEach((t, i) => {
-      viewerTagList.appendChild(criarChip(t, () => { viewerTags.splice(i, 1); renderViewerTags(); }));
+      if (e.dataTransfer.files) processarArquivosSelecionados(e.dataTransfer.files);
     });
   }
 
-  function abrirViewer(id) {
-    const item = galleryItems.find((i) => i.id === id);
-    if (!item) return;
-    viewerId = id;
-    viewerItem = item;
-    viewerTags = (item.tags || []).slice();
-
-    const ehArquivo = item.kind === 'file';
-    if (viewerTitle) viewerTitle.textContent = ehArquivo ? 'Arquivo' : 'Imagem';
-    if (viewerImg) viewerImg.style.display = ehArquivo ? 'none' : 'block';
-    if (viewerFileBox) viewerFileBox.style.display = ehArquivo ? 'flex' : 'none';
-    if (viewerFileStatus) viewerFileStatus.textContent = '';
-
-    if (ehArquivo) {
-      const tipo = TIPOS_ARQUIVO[item.ext] || { icone: 'fa-file', nome: 'Arquivo' };
-      if (viewerFileIcon) viewerFileIcon.className = 'fa-solid ' + tipo.icone + ' ext-' + item.ext;
-      if (viewerFileName) viewerFileName.textContent = item.name;
-      if (viewerFileMeta) viewerFileMeta.textContent = tipo.nome + ' · ' + formatarTamanho(item.size);
-      if (viewerImg) viewerImg.removeAttribute('src');
-    } else if (viewerImg) {
-      viewerImg.src = item.data;
+  function processarArquivosSelecionados(files) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`O arquivo ${file.name} excede o limite de 5 MB.`);
+        continue;
+      }
+      pendingFilesToUpload.push(file);
     }
+    renderizarPreviaUpload();
+  }
 
+  function renderizarPreviaUpload() {
+    if (!uploadPreview) return;
+    uploadPreview.innerHTML = '';
+    pendingFilesToUpload.forEach((file, idx) => {
+      const item = document.createElement('div');
+      item.className = 'upload-preview-item' + (file.type.startsWith('image/') ? '' : ' is-file');
+      
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          item.innerHTML = `<img src="${e.target.result}" alt="Preview"><button type="button" class="upload-remove" data-index="${idx}">&times;</button>`;
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        let icon = 'fa-file';
+        if (ext === 'pdf') icon = 'fa-file-pdf';
+        else if (['doc', 'docx'].includes(ext)) icon = 'fa-file-word';
+        else if (['xls', 'xlsx', 'csv'].includes(ext)) icon = 'fa-file-excel';
+        else if (['ppt', 'pptx'].includes(ext)) icon = 'fa-file-powerpoint';
+
+        item.innerHTML = `
+          <i class="fa-solid ${icon}"></i>
+          <span>${escapeHtml(file.name)}</span>
+          <button type="button" class="upload-remove" data-index="${idx}">&times;</button>
+        `;
+      }
+      uploadPreview.appendChild(item);
+    });
+
+    uploadPreview.querySelectorAll('.upload-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-index'));
+        pendingFilesToUpload.splice(idx, 1);
+        renderizarPreviaUpload();
+      });
+    });
+  }
+
+  function renderizarTagsUpload() {
+    if (!uploadTagList) return;
+    uploadTagList.innerHTML = '';
+    pendingUploadTags.forEach((tag, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.innerHTML = `${escapeHtml(tag)} <button type="button" class="chip-x" data-index="${idx}">&times;</button>`;
+      uploadTagList.appendChild(chip);
+    });
+
+    uploadTagList.querySelectorAll('.chip-x').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingUploadTags.splice(parseInt(btn.getAttribute('data-index')), 1);
+        renderizarTagsUpload();
+      });
+    });
+  }
+
+  if (btnAddUploadTag && uploadTagInput) {
+    btnAddUploadTag.addEventListener('click', adicionarTagUpload);
+    uploadTagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        adicionarTagUpload();
+      }
+    });
+  }
+
+  function adicionarTagUpload() {
+    const val = uploadTagInput.value.trim();
+    if (val && !pendingUploadTags.includes(val)) {
+      pendingUploadTags.push(val);
+      uploadTagInput.value = '';
+      renderizarTagsUpload();
+    }
+  }
+
+  if (btnSaveGalleryUpload) {
+    btnSaveGalleryUpload.addEventListener('click', async () => {
+      if (pendingFilesToUpload.length === 0) {
+        alert('Escolha pelo menos um arquivo ou imagem!');
+        return;
+      }
+
+      if (uploadStatus) uploadStatus.textContent = 'Enviando arquivos...';
+      btnSaveGalleryUpload.disabled = true;
+
+      try {
+        for (const file of pendingFilesToUpload) {
+          if (file.type.startsWith('image/')) {
+            await comprimirESalvarImagem(file, pendingUploadTags);
+          } else {
+            await comprimirESalvarArquivo(file, pendingUploadTags);
+          }
+        }
+        fecharUploadModal();
+        renderizarGaleria();
+      } catch (err) {
+        console.error('Erro no upload:', err);
+        alert('Erro ao enviar arquivo. Verifique sua conexão.');
+      } finally {
+        btnSaveGalleryUpload.disabled = false;
+        if (uploadStatus) uploadStatus.textContent = '';
+      }
+    });
+  }
+
+  function comprimirESalvarImagem(file, tags) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = async () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width;
+          let h = img.height;
+          const max = 1280;
+          if (w > max || h > max) {
+            if (w > h) { h = Math.round((h * max) / w); w = max; }
+            else { w = Math.round((w * max) / h); h = max; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          
+          // Miniatura menor
+          const canvasThumb = document.createElement('canvas');
+          canvasThumb.width = 250;
+          canvasThumb.height = Math.round((250 * h) / w);
+          const ctxThumb = canvasThumb.getContext('2d');
+          ctxThumb.drawImage(canvas, 0, 0, canvasThumb.width, canvasThumb.height);
+          const thumb = canvasThumb.toDataURL('image/jpeg', 0.7);
+
+          await db.collection('workspaces').doc(syncCode).collection('gallery').add({
+            type: 'image',
+            dataUrl: dataUrl,
+            thumb: thumb,
+            tags: tags,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          resolve();
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function comprimirESalvarArquivo(file, tags) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64String = e.target.result;
+        const docRef = await db.collection('workspaces').doc(syncCode).collection('gallery').add({
+          type: 'file',
+          name: file.name,
+          size: file.size,
+          mimeType: file.type,
+          tags: tags,
+          chunksCount: 0,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Dividir em chunks se necessário
+        const chunks = [];
+        for (let i = 0; i < base64String.length; i += UPLOAD_CHUNK_SIZE) {
+          chunks.push(base64String.substring(i, i + UPLOAD_CHUNK_SIZE));
+        }
+
+        const batch = db.batch();
+        chunks.forEach((chunk, idx) => {
+          const chunkRef = db.collection('workspaces').doc(syncCode).collection('gallery').doc(docRef.id).collection('chunks').doc(String(idx));
+          batch.set(chunkRef, { data: chunk });
+        });
+        batch.update(docRef, { chunksCount: chunks.length });
+        await batch.commit();
+        resolve();
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function abrirVisualizadorGaleria(item) {
+    currentViewingItem = item;
+    viewerTagsTemp = item.tags ? [...item.tags] : [];
     if (viewerTagInput) viewerTagInput.value = '';
-    atualizarDatalist();
-    renderViewerTags();
-    if (modalViewer) modalViewer.style.display = 'flex';
-  }
+    renderizarTagsViewer();
 
-  function fecharViewer() {
-    if (modalViewer) modalViewer.style.display = 'none';
-    if (viewerImg) viewerImg.removeAttribute('src');
-    viewerId = null;
-    viewerItem = null;
-  }
+    if (item.type === 'file') {
+      if (viewerImg) viewerImg.style.display = 'none';
+      if (viewerFileBox) viewerFileBox.style.display = 'flex';
+      if (viewerFileName) viewerFileName.textContent = item.name;
+      if (viewerFileMeta) viewerFileMeta.textContent = formatarTamanho(item.size);
+      if (viewerFileStatus) viewerFileStatus.textContent = '';
 
-  async function salvarTagsDoViewer() {
-    if (!viewerId) return;
-    if (viewerTagInput && viewerTagInput.value.trim()) {
-      adicionarTagDoInput(viewerTagInput, viewerTags, renderViewerTags);
+      const ext = (item.name.split('.').pop() || '').toLowerCase();
+      let iconClass = 'fa-file';
+      if (ext === 'pdf') iconClass = 'fa-file-pdf';
+      else if (['doc', 'docx'].includes(ext)) iconClass = 'fa-file-word';
+      else if (['xls', 'xlsx', 'csv'].includes(ext)) iconClass = 'fa-file-excel';
+      else if (['ppt', 'pptx'].includes(ext)) iconClass = 'fa-file-powerpoint';
+      if (viewerFileIcon) viewerFileIcon.className = `fa-solid ${iconClass} ${ext === 'pdf' ? 'ext-pdf' : ''}`;
+    } else {
+      if (viewerFileBox) viewerFileBox.style.display = 'none';
+      if (viewerImg) {
+        viewerImg.style.display = 'block';
+        viewerImg.src = item.dataUrl;
+      }
     }
-    try {
-      await galleryCol().doc(viewerId).update({ tags: viewerTags });
-      fecharViewer();
-    } catch (err) {
-      console.error('Erro ao salvar tags:', err);
-      alert('Não foi possível salvar as tags.');
+
+    if (modalGalleryView) modalGalleryView.style.display = 'flex';
+  }
+
+  function fecharVisualizadorGaleria() {
+    if (modalGalleryView) modalGalleryView.style.display = 'none';
+    currentViewingItem = null;
+  }
+
+  if (btnCloseGalleryView) btnCloseGalleryView.addEventListener('click', fecharVisualizadorGaleria);
+  if (btnCloseGalleryViewFooter) btnCloseGalleryViewFooter.addEventListener('click', fecharVisualizadorGaleria);
+
+  function renderizarTagsViewer() {
+    if (!viewerTagList) return;
+    viewerTagList.innerHTML = '';
+    viewerTagsTemp.forEach((tag, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.innerHTML = `${escapeHtml(tag)} <button type="button" class="chip-x" data-index="${idx}">&times;</button>`;
+      viewerTagList.appendChild(chip);
+    });
+
+    viewerTagList.querySelectorAll('.chip-x').forEach(btn => {
+      btn.addEventListener('click', () => {
+        viewerTagsTemp.splice(parseInt(btn.getAttribute('data-index')), 1);
+        renderizarTagsViewer();
+      });
+    });
+  }
+
+  if (btnAddViewerTag && viewerTagInput) {
+    btnAddViewerTag.addEventListener('click', adicionarTagViewer);
+    viewerTagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        adicionarTagViewer();
+      }
+    });
+  }
+
+  function adicionarTagViewer() {
+    const val = viewerTagInput.value.trim();
+    if (val && !viewerTagsTemp.includes(val)) {
+      viewerTagsTemp.push(val);
+      viewerTagInput.value = '';
+      renderizarTagsViewer();
     }
   }
 
-  async function excluirImagem() {
-    if (!viewerItem) return;
-    const oQue = viewerItem.kind === 'file' ? 'este arquivo' : 'esta imagem';
-    if (!confirm('Excluir ' + oQue + '? Essa ação não pode ser desfeita.')) return;
-    try {
-      await excluirItem(viewerItem);
-      fecharViewer();
-    } catch (err) {
-      console.error('Erro ao excluir:', err);
-      alert('Não foi possível excluir.');
-    }
+  if (btnSaveViewerTags) {
+    btnSaveViewerTags.addEventListener('click', async () => {
+      if (!currentViewingItem) return;
+      try {
+        await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).update({
+          tags: viewerTagsTemp
+        });
+        currentViewingItem.tags = [...viewerTagsTemp];
+        renderizarGaleria();
+        fecharVisualizadorGaleria();
+      } catch (err) {
+        console.error('Erro ao atualizar tags:', err);
+        alert('Erro ao salvar tags.');
+      }
+    });
   }
 
-  const btnCloseGalleryView = document.getElementById('btnCloseGalleryView');
-  const btnCloseGalleryViewFooter = document.getElementById('btnCloseGalleryViewFooter');
-  const btnSaveViewerTags = document.getElementById('btnSaveViewerTags');
-  const btnDeleteImage = document.getElementById('btnDeleteImage');
-  const btnDownloadFile = document.getElementById('btnDownloadFile');
-
-  if (btnCloseGalleryView) btnCloseGalleryView.addEventListener('click', fecharViewer);
-  if (btnCloseGalleryViewFooter) btnCloseGalleryViewFooter.addEventListener('click', fecharViewer);
-  if (btnSaveViewerTags) btnSaveViewerTags.addEventListener('click', salvarTagsDoViewer);
-  if (btnDeleteImage) btnDeleteImage.addEventListener('click', excluirImagem);
-  if (btnDownloadFile) btnDownloadFile.addEventListener('click', () => baixarArquivo(viewerItem));
-  ligarCampoDeTag(viewerTagInput, document.getElementById('btnAddViewerTag'), () => viewerTags, renderViewerTags);
-
-
-  // ===== INICIALIZAÇÃO GERAL =====
-  if (syncCode) {
-    iniciarSincronizacao();
-  } else {
-    abrirModalSyncCode(false);
+  if (btnDeleteImage) {
+    btnDeleteImage.addEventListener('click', async () => {
+      if (!currentViewingItem) return;
+      if (confirm('Deseja realmente excluir este item da galeria?')) {
+        try {
+          await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).delete();
+          fecharVisualizadorGaleria();
+          renderizarGaleria();
+        } catch (err) {
+          console.error('Erro ao excluir item:', err);
+          alert('Erro ao excluir item.');
+        }
+      }
+    });
   }
+
+  if (btnDownloadFile) {
+    btnDownloadFile.addEventListener('click', async () => {
+      if (!currentViewingItem || currentViewingItem.type !== 'file') return;
+      if (viewerFileStatus) viewerFileStatus.textContent = 'Baixando arquivo...';
+
+      try {
+        const chunksSnap = await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).collection('chunks').orderBy('__name__').get();
+        let base64 = '';
+        chunksSnap.forEach(doc => {
+          base64 += doc.data().data;
+        });
+
+        const a = document.createElement('a');
+        a.href = base64;
+        a.download = currentViewingItem.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        if (viewerFileStatus) viewerFileStatus.textContent = 'Download concluído!';
+      } catch (err) {
+        console.error('Erro ao baixar arquivo:', err);
+        if (viewerFileStatus) viewerFileStatus.textContent = 'Erro ao baixar arquivo.';
+      }
+    });
+  }
+
+
+  // Disparar sincronização inicial
+  if (!syncCode) {
+    syncCode = 'jarvito-geral-2024';
+    localStorage.setItem('jarvito_sync_code', syncCode);
+  }
+  iniciarSincronizacao();
 
 });

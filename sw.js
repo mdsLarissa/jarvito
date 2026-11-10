@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jarvito-cache-v4';
+const CACHE_NAME = 'jarvito-cache-v6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
