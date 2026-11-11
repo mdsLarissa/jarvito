@@ -1542,10 +1542,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
-  // ===== GALERIA & ARQUIVOS (Mantida intacta) =====
+  // ===== GALERIA & ARQUIVOS =====
   let galleryItems = [];
   let currentGalleryTag = '';
+  let unsubscribeGaleria = null;
   const UPLOAD_CHUNK_SIZE = 800000;
+  const MAX_DOC_CHARS = 900000;
 
   const galleryGrid = document.getElementById('galleryGrid');
   const galleryCount = document.getElementById('galleryCount');
@@ -1586,20 +1588,66 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentViewingItem = null;
   let viewerTagsTemp = [];
 
+  function galeriaRef() {
+    return db.collection('workspaces').doc(syncCode).collection('gallery');
+  }
+
+  function comTimeout(promessa, ms) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Tempo esgotado. Verifique sua conexão e tente de novo.')), ms);
+      promessa.then(
+        (v) => { clearTimeout(t); resolve(v); },
+        (e) => { clearTimeout(t); reject(e); }
+      );
+    });
+  }
+
+  function lerComoDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Falha ao ler o arquivo'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function carregarImagem(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Não foi possível abrir esta imagem'));
+      img.src = src;
+    });
+  }
+
   function iniciarGaleria(code) {
     carregarGaleria(code);
   }
 
   function carregarGaleria(code) {
-    db.collection('workspaces').doc(code).collection('gallery').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
+    if (unsubscribeGaleria) {
+      unsubscribeGaleria();
+      unsubscribeGaleria = null;
+    }
+    unsubscribeGaleria = db.collection('workspaces').doc(code).collection('gallery').orderBy('createdAt', 'desc').onSnapshot((snapshot) => {
       galleryItems = [];
       snapshot.forEach(doc => {
         galleryItems.push({ id: doc.id, ...doc.data() });
       });
       renderizarGaleria();
+      atualizarDatalist();
     }, (err) => {
       console.error('Erro ao carregar galeria:', err);
     });
+  }
+
+  function iconeDoArquivo(nome) {
+    const ext = (String(nome || '').split('.').pop() || '').toLowerCase();
+    if (ext === 'pdf') return { icon: 'fa-file-pdf', cls: 'ext-pdf' };
+    if (['doc', 'docx'].includes(ext)) return { icon: 'fa-file-word', cls: 'ext-doc' };
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return { icon: 'fa-file-excel', cls: 'ext-xls' };
+    if (['ppt', 'pptx'].includes(ext)) return { icon: 'fa-file-powerpoint', cls: 'ext-ppt' };
+    return { icon: 'fa-file', cls: '' };
   }
 
   function renderizarGaleria() {
@@ -1626,13 +1674,12 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.className = `tag-chip ${currentGalleryTag === tag ? 'active' : ''}`;
         chip.textContent = tag;
         chip.addEventListener('click', () => { currentGalleryTag = tag; renderizarGaleria(); });
-        galleryTagFilters.appendChild(chip.tag);
         galleryTagFilters.appendChild(chip);
       });
     }
 
-    const filtrados = currentGalleryTag === '' 
-      ? galleryItems 
+    const filtrados = currentGalleryTag === ''
+      ? galleryItems
       : galleryItems.filter(item => item.tags && item.tags.includes(currentGalleryTag));
 
     if (galleryCount) {
@@ -1653,16 +1700,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (item.type === 'file') {
         div.className = 'gallery-item gallery-file';
-        const ext = (item.name.split('.').pop() || '').toLowerCase();
-        let iconClass = 'fa-file';
-        let extClass = '';
-        if (ext === 'pdf') { iconClass = 'fa-file-pdf'; extClass = 'ext-pdf'; }
-        else if (['doc', 'docx'].includes(ext)) { iconClass = 'fa-file-word'; extClass = 'ext-doc'; }
-        else if (['xls', 'xlsx', 'csv'].includes(ext)) { iconClass = 'fa-file-excel'; extClass = 'ext-xls'; }
-        else if (['ppt', 'pptx'].includes(ext)) { iconClass = 'fa-file-powerpoint'; extClass = 'ext-ppt'; }
+        const info = iconeDoArquivo(item.name);
 
         div.innerHTML = `
-          <i class="fa-solid ${iconClass} gallery-file-icon ${extClass}"></i>
+          <i class="fa-solid ${info.icon} gallery-file-icon ${info.cls}"></i>
           <div class="gallery-file-name">${escapeHtml(item.name)}</div>
           <div class="gallery-file-meta">${formatarTamanho(item.size)}</div>
           <div class="gallery-item-tags">${tagsHTML}</div>
@@ -1709,6 +1750,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pendingUploadTags = [];
     if (uploadPreview) uploadPreview.innerHTML = '';
     if (uploadTagInput) uploadTagInput.value = '';
+    if (galleryFileInput) galleryFileInput.value = '';
     renderizarTagsUpload();
     if (uploadStatus) uploadStatus.textContent = '';
     if (modalGalleryUpload) modalGalleryUpload.style.display = 'flex';
@@ -1723,7 +1765,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (uploadDrop && galleryFileInput) {
     uploadDrop.addEventListener('click', () => galleryFileInput.click());
-    galleryFileInput.addEventListener('change', (e) => processarArquivosSelecionados(e.target.files));
+    galleryFileInput.addEventListener('change', (e) => {
+      processarArquivosSelecionados(e.target.files);
+      galleryFileInput.value = '';
+    });
     uploadDrop.addEventListener('dragover', (e) => { e.preventDefault(); uploadDrop.classList.add('dragover'); });
     uploadDrop.addEventListener('dragleave', () => uploadDrop.classList.remove('dragover'));
     uploadDrop.addEventListener('drop', (e) => {
@@ -1750,37 +1795,34 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadPreview.innerHTML = '';
     pendingFilesToUpload.forEach((file, idx) => {
       const item = document.createElement('div');
-      item.className = 'upload-preview-item' + (file.type.startsWith('image/') ? '' : ' is-file');
-      
-      if (file.type.startsWith('image/')) {
+      const ehImagem = file.type.startsWith('image/');
+      item.className = 'upload-preview-item' + (ehImagem ? '' : ' is-file');
+
+      if (ehImagem) {
         const reader = new FileReader();
         reader.onload = (e) => {
           item.innerHTML = `<img src="${e.target.result}" alt="Preview"><button type="button" class="upload-remove" data-index="${idx}">&times;</button>`;
+          const x = item.querySelector('.upload-remove');
+          if (x) x.addEventListener('click', () => {
+            pendingFilesToUpload.splice(idx, 1);
+            renderizarPreviaUpload();
+          });
         };
         reader.readAsDataURL(file);
       } else {
-        const ext = (file.name.split('.').pop() || '').toLowerCase();
-        let icon = 'fa-file';
-        if (ext === 'pdf') icon = 'fa-file-pdf';
-        else if (['doc', 'docx'].includes(ext)) icon = 'fa-file-word';
-        else if (['xls', 'xlsx', 'csv'].includes(ext)) icon = 'fa-file-excel';
-        else if (['ppt', 'pptx'].includes(ext)) icon = 'fa-file-powerpoint';
-
+        const info = iconeDoArquivo(file.name);
         item.innerHTML = `
-          <i class="fa-solid ${icon}"></i>
+          <i class="fa-solid ${info.icon}"></i>
           <span>${escapeHtml(file.name)}</span>
           <button type="button" class="upload-remove" data-index="${idx}">&times;</button>
         `;
+        const x = item.querySelector('.upload-remove');
+        if (x) x.addEventListener('click', () => {
+          pendingFilesToUpload.splice(idx, 1);
+          renderizarPreviaUpload();
+        });
       }
       uploadPreview.appendChild(item);
-    });
-
-    uploadPreview.querySelectorAll('.upload-remove').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = parseInt(btn.getAttribute('data-index'));
-        pendingFilesToUpload.splice(idx, 1);
-        renderizarPreviaUpload();
-      });
     });
   }
 
@@ -1816,9 +1858,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const val = uploadTagInput.value.trim();
     if (val && !pendingUploadTags.includes(val)) {
       pendingUploadTags.push(val);
-      uploadTagInput.value = '';
-      renderizarTagsUpload();
     }
+    uploadTagInput.value = '';
+    renderizarTagsUpload();
   }
 
   if (btnSaveGalleryUpload) {
@@ -1827,108 +1869,113 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Escolha pelo menos um arquivo ou imagem!');
         return;
       }
+      if (!syncCode) {
+        alert('Defina o código de sincronização antes de enviar arquivos.');
+        return;
+      }
 
-      if (uploadStatus) uploadStatus.textContent = 'Enviando arquivos...';
+      if (uploadTagInput && uploadTagInput.value.trim()) adicionarTagUpload();
+
       btnSaveGalleryUpload.disabled = true;
+      const total = pendingFilesToUpload.length;
+      let atual = 0;
 
       try {
         for (const file of pendingFilesToUpload) {
+          atual++;
+          if (uploadStatus) uploadStatus.textContent = `Enviando ${atual} de ${total}: ${file.name}`;
           if (file.type.startsWith('image/')) {
-            await comprimirESalvarImagem(file, pendingUploadTags);
+            await comTimeout(comprimirESalvarImagem(file, pendingUploadTags.slice()), 60000);
           } else {
-            await comprimirESalvarArquivo(file, pendingUploadTags);
+            await comTimeout(comprimirESalvarArquivo(file, pendingUploadTags.slice()), 90000);
           }
         }
+        pendingFilesToUpload = [];
+        if (uploadStatus) uploadStatus.textContent = '';
         fecharUploadModal();
-        renderizarGaleria();
       } catch (err) {
         console.error('Erro no upload:', err);
-        alert('Erro ao enviar arquivo. Verifique sua conexão.');
+        const msg = err && err.code === 'permission-denied'
+          ? 'O Firebase recusou o envio (permission-denied). Confira as regras do Firestore.'
+          : 'Erro ao enviar: ' + (err && err.message ? err.message : 'verifique sua conexão.');
+        if (uploadStatus) uploadStatus.textContent = msg;
+        alert(msg);
       } finally {
         btnSaveGalleryUpload.disabled = false;
-        if (uploadStatus) uploadStatus.textContent = '';
       }
     });
   }
 
-  function comprimirESalvarImagem(file, tags) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = async () => {
-          const canvas = document.createElement('canvas');
-          let w = img.width;
-          let h = img.height;
-          const max = 1280;
-          if (w > max || h > max) {
-            if (w > h) { h = Math.round((h * max) / w); w = max; }
-            else { w = Math.round((w * max) / h); h = max; }
-          }
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-          
-          // Miniatura menor
-          const canvasThumb = document.createElement('canvas');
-          canvasThumb.width = 250;
-          canvasThumb.height = Math.round((250 * h) / w);
-          const ctxThumb = canvasThumb.getContext('2d');
-          ctxThumb.drawImage(canvas, 0, 0, canvasThumb.width, canvasThumb.height);
-          const thumb = canvasThumb.toDataURL('image/jpeg', 0.7);
+  async function comprimirESalvarImagem(file, tags) {
+    const original = await lerComoDataURL(file);
+    const img = await carregarImagem(original);
 
-          await db.collection('workspaces').doc(syncCode).collection('gallery').add({
-            type: 'image',
-            dataUrl: dataUrl,
-            thumb: thumb,
-            tags: tags,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          resolve();
-        };
-        img.onerror = reject;
-        img.src = e.target.result;
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+    let w = img.width;
+    let h = img.height;
+    const max = 1280;
+    if (w > max || h > max) {
+      if (w > h) { h = Math.round((h * max) / w); w = max; }
+      else { w = Math.round((w * max) / h); h = max; }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+
+    let qualidade = 0.82;
+    let dataUrl = canvas.toDataURL('image/jpeg', qualidade);
+    while (dataUrl.length > MAX_DOC_CHARS && qualidade > 0.3) {
+      qualidade -= 0.1;
+      dataUrl = canvas.toDataURL('image/jpeg', qualidade);
+    }
+    if (dataUrl.length > MAX_DOC_CHARS) {
+      throw new Error('A imagem ficou grande demais para o Firestore (limite de 1 MB por documento).');
+    }
+
+    const canvasThumb = document.createElement('canvas');
+    canvasThumb.width = 250;
+    canvasThumb.height = Math.max(1, Math.round((250 * h) / w));
+    canvasThumb.getContext('2d').drawImage(canvas, 0, 0, canvasThumb.width, canvasThumb.height);
+    const thumb = canvasThumb.toDataURL('image/jpeg', 0.7);
+
+    await galeriaRef().add({
+      type: 'image',
+      name: file.name,
+      dataUrl: dataUrl,
+      thumb: thumb,
+      tags: tags,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
   }
 
-  function comprimirESalvarArquivo(file, tags) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64String = e.target.result;
-        const docRef = await db.collection('workspaces').doc(syncCode).collection('gallery').add({
-          type: 'file',
-          name: file.name,
-          size: file.size,
-          mimeType: file.type,
-          tags: tags,
-          chunksCount: 0,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+  async function comprimirESalvarArquivo(file, tags) {
+    const base64String = await lerComoDataURL(file);
 
-        // Dividir em chunks se necessário
-        const chunks = [];
-        for (let i = 0; i < base64String.length; i += UPLOAD_CHUNK_SIZE) {
-          chunks.push(base64String.substring(i, i + UPLOAD_CHUNK_SIZE));
-        }
+    const chunks = [];
+    for (let i = 0; i < base64String.length; i += UPLOAD_CHUNK_SIZE) {
+      chunks.push(base64String.substring(i, i + UPLOAD_CHUNK_SIZE));
+    }
 
-        const batch = db.batch();
-        chunks.forEach((chunk, idx) => {
-          const chunkRef = db.collection('workspaces').doc(syncCode).collection('gallery').doc(docRef.id).collection('chunks').doc(String(idx));
-          batch.set(chunkRef, { data: chunk });
-        });
-        batch.update(docRef, { chunksCount: chunks.length });
-        await batch.commit();
-        resolve();
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+    // Tudo em um único lote: o item só aparece na galeria quando as partes também foram gravadas.
+    const docRef = galeriaRef().doc();
+    const batch = db.batch();
+    batch.set(docRef, {
+      type: 'file',
+      name: file.name,
+      size: file.size,
+      mimeType: file.type || '',
+      tags: tags,
+      chunksCount: chunks.length,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    chunks.forEach((chunk, idx) => {
+      batch.set(docRef.collection('chunks').doc(String(idx)), { data: chunk, index: idx });
+    });
+    await batch.commit();
   }
 
   function abrirVisualizadorGaleria(item) {
@@ -1940,22 +1987,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (item.type === 'file') {
       if (viewerImg) viewerImg.style.display = 'none';
       if (viewerFileBox) viewerFileBox.style.display = 'flex';
+      if (viewerTitle) viewerTitle.textContent = 'Arquivo';
       if (viewerFileName) viewerFileName.textContent = item.name;
       if (viewerFileMeta) viewerFileMeta.textContent = formatarTamanho(item.size);
       if (viewerFileStatus) viewerFileStatus.textContent = '';
 
-      const ext = (item.name.split('.').pop() || '').toLowerCase();
-      let iconClass = 'fa-file';
-      if (ext === 'pdf') iconClass = 'fa-file-pdf';
-      else if (['doc', 'docx'].includes(ext)) iconClass = 'fa-file-word';
-      else if (['xls', 'xlsx', 'csv'].includes(ext)) iconClass = 'fa-file-excel';
-      else if (['ppt', 'pptx'].includes(ext)) iconClass = 'fa-file-powerpoint';
-      if (viewerFileIcon) viewerFileIcon.className = `fa-solid ${iconClass} ${ext === 'pdf' ? 'ext-pdf' : ''}`;
+      const info = iconeDoArquivo(item.name);
+      if (viewerFileIcon) viewerFileIcon.className = `fa-solid ${info.icon} ${info.cls}`;
     } else {
       if (viewerFileBox) viewerFileBox.style.display = 'none';
+      if (viewerTitle) viewerTitle.textContent = 'Imagem';
       if (viewerImg) {
         viewerImg.style.display = 'block';
-        viewerImg.src = item.dataUrl;
+        viewerImg.src = item.dataUrl || item.thumb || '';
       }
     }
 
@@ -2010,8 +2054,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnSaveViewerTags) {
     btnSaveViewerTags.addEventListener('click', async () => {
       if (!currentViewingItem) return;
+      if (viewerTagInput && viewerTagInput.value.trim()) adicionarTagViewer();
       try {
-        await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).update({
+        await galeriaRef().doc(currentViewingItem.id).update({
           tags: viewerTagsTemp
         });
         currentViewingItem.tags = [...viewerTagsTemp];
@@ -2027,15 +2072,25 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnDeleteImage) {
     btnDeleteImage.addEventListener('click', async () => {
       if (!currentViewingItem) return;
-      if (confirm('Deseja realmente excluir este item da galeria?')) {
-        try {
-          await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).delete();
-          fecharVisualizadorGaleria();
-          renderizarGaleria();
-        } catch (err) {
-          console.error('Erro ao excluir item:', err);
-          alert('Erro ao excluir item.');
+      if (!confirm('Deseja realmente excluir este item da galeria?')) return;
+
+      try {
+        const docRef = galeriaRef().doc(currentViewingItem.id);
+
+        if (currentViewingItem.type === 'file') {
+          const partes = await docRef.collection('chunks').get();
+          if (!partes.empty) {
+            const batch = db.batch();
+            partes.forEach(p => batch.delete(p.ref));
+            await batch.commit();
+          }
         }
+
+        await docRef.delete();
+        fecharVisualizadorGaleria();
+      } catch (err) {
+        console.error('Erro ao excluir item:', err);
+        alert('Erro ao excluir item.');
       }
     });
   }
@@ -2046,18 +2101,25 @@ document.addEventListener('DOMContentLoaded', () => {
       if (viewerFileStatus) viewerFileStatus.textContent = 'Baixando arquivo...';
 
       try {
-        const chunksSnap = await db.collection('workspaces').doc(syncCode).collection('gallery').doc(currentViewingItem.id).collection('chunks').orderBy('__name__').get();
-        let base64 = '';
-        chunksSnap.forEach(doc => {
-          base64 += doc.data().data;
-        });
+        const snap = await galeriaRef().doc(currentViewingItem.id).collection('chunks').get();
+        const partes = [];
+        snap.forEach(doc => partes.push({ n: Number(doc.id), data: doc.data().data }));
+        partes.sort((a, b) => a.n - b.n);
+
+        if (partes.length === 0) throw new Error('Arquivo sem conteúdo');
+
+        const base64 = partes.map(p => p.data).join('');
+        const blob = await (await fetch(base64)).blob();
+        const url = URL.createObjectURL(blob);
 
         const a = document.createElement('a');
-        a.href = base64;
+        a.href = url;
         a.download = currentViewingItem.name;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+
         if (viewerFileStatus) viewerFileStatus.textContent = 'Download concluído!';
       } catch (err) {
         console.error('Erro ao baixar arquivo:', err);

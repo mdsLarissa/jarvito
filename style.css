@@ -41,8 +41,6 @@
   padding: 0;
   box-sizing: border-box;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  
-  /* BARRA DE ROLAGEM ESTILO JARVITO (GLOBAL) */
   scrollbar-width: thin;
   scrollbar-color: var(--accent) rgba(var(--accent-rgb), 0.1);
 }
@@ -1140,9 +1138,7 @@ body {
 }
 
 .task-item { flex-wrap: wrap; }
-
 .task-title:hover { background: rgba(var(--accent-rgb), 0.2); }
-
 .task-item.is-open { border-left-color: var(--accent2); }
 
 .task-desc-badge {
@@ -1216,9 +1212,7 @@ body {
 }
 
 .gallery-file-meta { font-size: 11px; opacity: 0.7; }
-
 .gallery-item.gallery-file .gallery-item-tags { background: transparent; padding: 0 8px 8px; }
-
 .upload-hint { display: block; margin-top: 6px; opacity: 0.8; font-size: 11px; }
 
 .upload-preview-item {
@@ -1278,7 +1272,6 @@ body {
 .viewer-file-meta { font-size: 13px; opacity: 0.75; }
 
 .accent-swatch-custom { cursor: pointer; }
-
 .accent-custom-wrap { position: relative; width: 44px; height: 44px; }
 
 .accent-dot-custom {
@@ -1315,7 +1308,6 @@ body {
   min-width: 0;
 }
 
-/* BOTÃO DE ARRASTAR DOS PROJETOS (APARECE APENAS NO HOVER DO CARD) */
 .project-drag-handle {
   display: inline-flex;
   align-items: center;
@@ -1330,7 +1322,6 @@ body {
   -webkit-user-select: none;
   flex-shrink: 0;
   font-size: 16px;
-  
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.2s ease, visibility 0.2s ease, background 0.2s;
@@ -1364,7 +1355,6 @@ body.is-dragging, body.is-dragging * {
   -webkit-user-select: none;
 }
 
-/* ===== DESIGN DE NOTAS (VIDRO FOSCO + PALETA 2: JEWEL TONES) ===== */
 .notes-creator-box {
   background: rgba(var(--card-rgb), 0.65);
   backdrop-filter: blur(12px);
@@ -1445,13 +1435,12 @@ body.is-dragging, body.is-dragging * {
   transform: scale(1.12);
 }
 
-/* Cores da Paleta 2 (Jewel Tones / Pedras Preciosas) */
-.dot-amarelo { background: #d97706; } /* Âmbar / Ouro velho */
-.dot-rosa    { background: #e11d48; } /* Rubi / Vermelho profundo */
-.dot-azul    { background: #2563eb; } /* Azul Safira */
-.dot-verde   { background: #059669; } /* Verde Esmeralda */
-.dot-laranja { background: #ea580c; } /* Laranja Cobre */
-.dot-lilas   { background: #7c3aed; } /* Roxo Ametista */
+.dot-amarelo { background: #d97706; }
+.dot-rosa    { background: #e11d48; }
+.dot-azul    { background: #2563eb; }
+.dot-verde   { background: #059669; }
+.dot-laranja { background: #ea580c; }
+.dot-lilas   { background: #7c3aed; }
 
 .btn-add-note {
   background: linear-gradient(90deg, var(--accent), var(--accent2));
@@ -1503,11 +1492,11 @@ body.is-dragging, body.is-dragging * {
   transform: none;
 }
 
-/* Faixa de cabeçalho colorida com os tons Jewel Tones */
 .sticky-header-banner {
   height: 10px;
   width: 100%;
 }
+
 .sticky-note.color-amarelo .sticky-header-banner { background: #d97706; }
 .sticky-note.color-rosa .sticky-header-banner    { background: #e11d48; }
 .sticky-note.color-azul .sticky-header-banner    { background: #2563eb; }
